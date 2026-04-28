@@ -198,7 +198,9 @@ static inline uint32_t mod_xlat(SDL_Keymod smod)
 
 static bool hw_textinput_active = false;
 static bool hw_key_press_repeat_active = true;
-extern const char *main_replay_file;
+extern const char *os_get_path_user(void);
+static SDL_Keycode hw_screenshot_key = SDLK_F12;
+static int hw_screenshot_count = 0;
 
 /* -------------------------------------------------------------------------- */
 
@@ -503,6 +505,91 @@ static bool replay_key_lookup(const char *name, struct replay_key_s *out)
         return true;
     }
     return false;
+}
+
+static SDL_Keycode replay_key_to_sdl(const char *name)
+{
+    if ((name[0] >= 'A') && (name[0] <= 'Z') && (name[1] == '\0')) {
+        return SDLK_a + (name[0] - 'A');
+    }
+    if ((name[0] >= '0') && (name[0] <= '9') && (name[1] == '\0')) {
+        return SDLK_0 + (name[0] - '0');
+    }
+    if ((name[0] == 'F') && isdigit((unsigned char)name[1])) {
+        char *endptr = NULL;
+        long fnum = strtol(name + 1, &endptr, 10);
+        if ((endptr != NULL) && (*endptr == '\0') && (fnum >= 1) && (fnum <= 12)) {
+            return SDLK_F1 + fnum - 1;
+        }
+    }
+    if (strcmp(name, "ESCAPE") == 0) {
+        return SDLK_ESCAPE;
+    }
+    if (strcmp(name, "RETURN") == 0) {
+        return SDLK_RETURN;
+    }
+    if (strcmp(name, "UP") == 0) {
+        return SDLK_UP;
+    }
+    if (strcmp(name, "DOWN") == 0) {
+        return SDLK_DOWN;
+    }
+    if (strcmp(name, "LEFT") == 0) {
+        return SDLK_LEFT;
+    }
+    if (strcmp(name, "RIGHT") == 0) {
+        return SDLK_RIGHT;
+    }
+    if (strcmp(name, "SLASH") == 0) {
+        return SDLK_SLASH;
+    }
+    return SDLK_UNKNOWN;
+}
+
+static char *replay_screenshot_path(const char *path)
+{
+    const char *slash;
+
+    if ((main_autoshot_dir != NULL) && (main_autoshot_dir[0] != '\0')) {
+        slash = strrchr(path, '/');
+#ifdef _WIN32
+        {
+            const char *backslash = strrchr(path, '\\');
+            if ((slash == NULL) || ((backslash != NULL) && (backslash > slash))) {
+                slash = backslash;
+            }
+        }
+#endif
+        return replay_concat3(main_autoshot_dir, "/", (slash != NULL) ? slash + 1 : path);
+    }
+    return replay_strdup(path);
+}
+
+static char *hw_manual_screenshot_path(void)
+{
+    char name[64];
+    const char *dir;
+
+    ++hw_screenshot_count;
+    snprintf(name, sizeof(name), "shot%04i.png", hw_screenshot_count);
+    if ((main_autoshot_dir != NULL) && (main_autoshot_dir[0] != '\0')) {
+        return replay_concat3(main_autoshot_dir, "/", name);
+    }
+    dir = os_get_path_user();
+    return replay_concat3(dir, "/shots/", name);
+}
+
+static void hw_manual_screenshot(void)
+{
+    char *path = hw_manual_screenshot_path();
+    if (path == NULL) {
+        log_error("Replay: could not allocate screenshot path\n");
+        return;
+    }
+    if (hw_video_screenshot_png(path) == 0) {
+        log_message("Screenshot: wrote '%s'\n", path);
+    }
+    free(path);
 }
 
 static int replay_add_op(struct replay_op_s *op)
@@ -838,14 +925,22 @@ static void replay_step(void)
                 ++replay.pos;
                 return;
             case REPLAY_OP_SCREENSHOT:
-                if (hw_video_screenshot_png(op->text) != 0) {
-                    exit(EXIT_FAILURE);
+                {
+                    char *path = replay_screenshot_path(op->text);
+                    if (path == NULL || hw_video_screenshot_png(path) != 0) {
+                        free(path);
+                        exit(EXIT_FAILURE);
+                    }
+                    free(path);
                 }
                 ++replay.pos;
                 break;
             case REPLAY_OP_ASSERT_TURN:
-                log_error("Replay: %s:%i ASSERT_TURN is not implemented in the SDL2 backend\n", main_replay_file, op->line);
-                exit(EXIT_FAILURE);
+                if (main_replay_current_year != op->a) {
+                    log_error("Replay: %s:%i ASSERT_TURN expected %i, got %i\n", main_replay_file, op->line, op->a, main_replay_current_year);
+                    exit(EXIT_FAILURE);
+                }
+                ++replay.pos;
                 break;
             case REPLAY_OP_END:
                 log_message("Replay: END\n");
@@ -879,6 +974,11 @@ int hw_init(void)
         return 12;
     }
     build_key_xlat();
+    hw_screenshot_key = replay_key_to_sdl(main_shotkey_name);
+    if (hw_screenshot_key == SDLK_UNKNOWN) {
+        log_error("option '-shotkey' has unsupported key '%s'\n", main_shotkey_name);
+        return 13;
+    }
     if (main_replay_file != NULL) {
         if (replay_parse_file(main_replay_file) != 0) {
             replay_free();
@@ -925,6 +1025,10 @@ int hw_event_handle(void)
             uint32_t mod;
             case SDL_KEYDOWN:
                 if (e.key.repeat && !hw_key_press_repeat_active) {
+                    break;
+                }
+                if ((e.key.keysym.sym == hw_screenshot_key) && (mod_xlat(e.key.keysym.mod) == 0)) {
+                    hw_manual_screenshot();
                     break;
                 }
                 {

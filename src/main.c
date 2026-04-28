@@ -20,6 +20,9 @@
 
 static bool main_startup_ok = false;
 const char *main_replay_file = NULL;
+const char *main_autoshot_dir = NULL;
+const char *main_shotkey_name = "F12";
+int main_replay_current_year = -1;
 
 /* -------------------------------------------------------------------------- */
 
@@ -151,7 +154,7 @@ static int main_filter_trace_args(int argc, char **argv, int *argc_out, char ***
     int argc_filtered = 0;
     char *replay_load_filename = NULL;
 
-    argv_filtered = malloc(sizeof(*argv_filtered) * (argc + 3));
+    argv_filtered = malloc(sizeof(*argv_filtered) * (argc + 4));
     if (argv_filtered == NULL) {
         log_error("Trace: could not allocate argv filter\n");
         return -1;
@@ -189,11 +192,34 @@ static int main_filter_trace_args(int argc, char **argv, int *argc_out, char ***
             ++i;
             continue;
         }
+        if (strcmp(argv[i], "-autoshot") == 0) {
+            if ((i + 1) >= argc) {
+                log_error("option '-autoshot' is missing the parameter\n");
+                free(argv_filtered);
+                return -1;
+            }
+            main_autoshot_dir = argv[i + 1];
+            ++i;
+            continue;
+        }
+        if (strcmp(argv[i], "-shotkey") == 0) {
+            if ((i + 1) >= argc) {
+                log_error("option '-shotkey' is missing the parameter\n");
+                free(argv_filtered);
+                return -1;
+            }
+            main_shotkey_name = argv[i + 1];
+            ++i;
+            continue;
+        }
         argv_filtered[argc_filtered++] = argv[i];
     }
     if (replay_load_filename != NULL) {
         argv_filtered[argc_filtered++] = "-load";
         argv_filtered[argc_filtered++] = replay_load_filename;
+        if (strcmp(idstr_ui, "cmdline") == 0) {
+            argv_filtered[argc_filtered++] = "-savequit";
+        }
     }
     argv_filtered[argc_filtered] = NULL;
     *argc_out = argc_filtered;

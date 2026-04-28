@@ -62,6 +62,11 @@ static const int game_ai_gate_turns_num = sizeof(game_ai_gate_turns) / sizeof(ga
 
 /* -------------------------------------------------------------------------- */
 
+static void game_replay_update_current_year(void)
+{
+    main_replay_current_year = game.year + YEAR_BASE;
+}
+
 static int game_opt_set_ai_gate(char **argv, void *var)
 {
     *(const char **)var = argv[1];
@@ -1156,6 +1161,7 @@ int main_do(void)
         main_menu_start_game:
         game_aux_start(&game_aux, &game);
         game_start(&game);
+        game_replay_update_current_year();
         if (game_opt_ai_gate_path) {
             int ret = game_run_ai_gate(&game, game_opt_ai_gate_path);
             game_opt_ai_gate_path = 0;
@@ -1176,6 +1182,7 @@ int main_do(void)
                 if (game_opt_save_quit) {
                     goto turn_act_quit;
                 }
+                game_replay_update_current_year();
                 switch (ui_game_turn(&game, &load_game_i, game.active_player)) {
                     case UI_TURN_ACT_LOAD_GAME:
                         main_menu_action = MAIN_MENU_ACT_LOAD_GAME;
@@ -1200,6 +1207,7 @@ int main_do(void)
             }
             if (game_end.type != GAME_END_QUIT) {
                 game_end = game_turn_process(&game);
+                game_replay_update_current_year();
             }
             game.active_player = PLAYER_0;
         }
