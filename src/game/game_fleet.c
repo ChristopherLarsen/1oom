@@ -58,6 +58,7 @@ static bool game_send_fleet_do(struct game_s *g, player_id_t owner, uint8_t from
                     ADDSATT(r->ships[st], ships[j], game_num_limit_ships);
                 }
             }
+            LOG_EVENT(g->year, "fleet_send", "owner=%i from=%u dest=%u speed=%u retreat=%i merged=1", owner, from, dest, speed, retreat ? 1 : 0);
             return true;
         }
     }
@@ -85,6 +86,7 @@ static bool game_send_fleet_do(struct game_s *g, player_id_t owner, uint8_t from
     BOOLVEC_CLEAR(r->visible, PLAYER_NUM);
     BOOLVEC_SET1(r->visible, owner);
     ++g->enroute_num;
+    LOG_EVENT(g->year, "fleet_send", "owner=%i from=%u dest=%u speed=%u retreat=%i merged=0", owner, from, dest, speed, retreat ? 1 : 0);
     return true;
 }
 
@@ -168,6 +170,7 @@ bool game_send_transport(struct game_s *g, struct planet_s *pf)
     }
     pf->trans_num = 0;
     ++g->transport_num;
+    LOG_EVENT(g->year, "transport_send", "owner=%i from_x=%u from_y=%u dest=%u pop=%u speed=%u", owner, pf->x, pf->y, r->dest, r->pop, r->speed);
     return true;
 }
 
@@ -293,14 +296,18 @@ void game_fleet_redirect(struct game_s *g, struct fleet_enroute_s *r, uint8_t pf
 {
     if ((pfrom != PLANET_NONE) && (pfrom == pto)) {
         shipcount_t *os;
+        player_id_t owner = r->owner;
         os = &(g->eto[r->owner].orbit[pto].ships[0]);
         for (int i = 0; i < NUM_SHIPDESIGNS; ++i) {
             os[i] += r->ships[i];
         }
         util_table_remove_item_any_order(r - g->enroute, g->enroute, sizeof(fleet_enroute_t), g->enroute_num);
         --g->enroute_num;
+        LOG_EVENT(g->year, "fleet_redirect_orbit", "owner=%i dest=%u", owner, pto);
     } else {
+        uint8_t old_dest = r->dest;
         r->dest = pto;
         r->speed = game_fleet_get_speed(g, r, pfrom, pto);
+        LOG_EVENT(g->year, "fleet_redirect", "owner=%i from_dest=%u to_dest=%u speed=%u", r->owner, old_dest, pto, r->speed);
     }
 }

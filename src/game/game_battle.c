@@ -353,6 +353,7 @@ void game_battle_handle_all(struct game_s *g)
                 BOOLVEC_SET0(tbl_have_force, party_att);
             } else {
                 if (!IS_HUMAN(g, party_def) && !IS_HUMAN(g, party_att)) {
+                    LOG_EVENT(g->year, "combat_start", "planet=%i attacker=%i defender=%i human=0", pli, party_att, party_def);
                     game_battle_prepare(bt, party_att, party_def, pli);
                     if (game_ai->battle_ai_ai_resolve(bt)) {
                         /* HACK _att won, swap variables */
@@ -360,6 +361,7 @@ void game_battle_handle_all(struct game_s *g)
                     }
                     /* _def won */
                     BOOLVEC_SET0(tbl_have_force, party_att);
+                    LOG_EVENT(g->year, "combat_result", "planet=%i winner=%i loser=%i human=0", pli, party_def, party_att);
                     game_battle_post(g, party_att, party_def, pli);
                 } else {
                     /*11926*/
@@ -380,12 +382,14 @@ void game_battle_handle_all(struct game_s *g)
                             bt->flag_human_att = true;
                         }
                         game_battle_prepare(bt, party_r, party_l, pli);
+                        LOG_EVENT(g->year, "combat_start", "planet=%i attacker=%i defender=%i human=1", pli, party_r, party_l);
                         if (game_battle_with_human(bt)) {
                             /* HACK _r won, swap variables */
                             int t = party_r; party_r = party_l; party_l = t;
                         }
                         /* _l won */
                         BOOLVEC_SET0(tbl_have_force, party_r);
+                        LOG_EVENT(g->year, "combat_result", "planet=%i winner=%i loser=%i human=1", pli, party_l, party_r);
                         game_battle_post(g, party_r, party_l, pli);
                         /*v14 = 1;*/
                     }
@@ -414,6 +418,7 @@ void game_battle_finish(struct battle_s *bt)
             game_planet_destroy(g, bt->planet_i, bt->s[SIDE_R].party);
         }
     }
+    LOG_EVENT(g->year, "combat_finish", "planet=%u left=%i right=%i pop=%u factories=%u bases=%u biodamage=%u", bt->planet_i, bt->s[SIDE_L].party, bt->s[SIDE_R].party, p->pop, p->factories, p->missile_bases, bt->biodamage);
     for (battle_side_i_t side = SIDE_L; side <= SIDE_R; ++side) {
         if (bt->s[side].party < PLAYER_NUM) {
             empiretechorbit_t *e = &(g->eto[bt->s[side].party]);

@@ -10,6 +10,7 @@
 #include "game_planet.h"
 #include "game_spy.h"
 #include "game_tech.h"
+#include "log.h"
 #include "rnd.h"
 #include "types.h"
 
@@ -106,6 +107,7 @@ void game_diplo_act(struct game_s *g, int dv, player_id_t pi, player_id_t pi2, i
     }
     if (dv != 0) {
         int v = e2->relation1[pi];
+        int old_relation = v;
         v += dv;
         SETRANGE(v, -100, 100);
         e2->relation1[pi] = v;
@@ -127,6 +129,7 @@ void game_diplo_act(struct game_s *g, int dv, player_id_t pi, player_id_t pi2, i
             e->diplo_p2[pi2] = dp2;
             e->diplo_p1[pi2] = pli1;
         }
+        LOG_EVENT(g->year, "diplo_relation", "actor=%i target=%i delta=%i from=%i to=%i type=%i", pi, pi2, dv, old_relation, v, dtype);
     }
     if (e2->treaty[pi] >= TREATY_WAR) {
         SETMAX(e2->relation1[pi], -25);
@@ -149,6 +152,7 @@ void game_diplo_break_treaty(struct game_s *g, player_id_t breaker, player_id_t 
     if (ev->treaty[breaker] >= TREATY_WAR) {
         return;
     }
+    treaty_t old_treaty = eb->treaty[victim];
     w = 0;
     if (eb->treaty[victim] == TREATY_NONAGGRESSION) {
         w = -10;
@@ -194,6 +198,7 @@ void game_diplo_break_treaty(struct game_s *g, player_id_t breaker, player_id_t 
     ev->mood_trade[breaker] = -200;
     ev->mood_tech[breaker] = -200;
     ev->mood_peace[breaker] = -200;
+    LOG_EVENT(g->year, "diplo_treaty_break", "breaker=%i victim=%i old=%i", breaker, victim, old_treaty);
 }
 
 void game_diplo_start_war(struct game_s *g, player_id_t pi, player_id_t pi2)
@@ -229,6 +234,7 @@ void game_diplo_start_war(struct game_s *g, player_id_t pi, player_id_t pi2)
     e2->mood_trade[pi] = -200;
     e2->mood_tech[pi] = -200;
     e2->mood_peace[pi] = -130;
+    LOG_EVENT(g->year, "diplo_war_start", "a=%i b=%i", pi, pi2);
 }
 
 void game_diplo_start_war_swap(struct game_s *g, player_id_t pi, player_id_t pi2)
@@ -258,6 +264,7 @@ void game_diplo_break_trade(struct game_s *g, player_id_t pi, player_id_t pi2)
     e2->attack_bounty[pi] = PLAYER_NONE;
     SETMAX(e->relation1[pi2], -100);
     e2->relation1[pi] = e->relation1[pi2];
+    LOG_EVENT(g->year, "diplo_trade_break", "a=%i b=%i", pi, pi2);
     if (e->treaty[pi2] >= TREATY_WAR) {
         return;
     }
@@ -357,6 +364,7 @@ void game_diplo_set_treaty(struct game_s *g, player_id_t p1, player_id_t p2, tre
     empiretechorbit_t *e2 = &(g->eto[p2]);
     e1->treaty[p2] = treaty;
     e2->treaty[p1] = treaty;
+    LOG_EVENT(g->year, "diplo_treaty_set", "a=%i b=%i treaty=%i", p1, p2, treaty);
 }
 
 void game_diplo_set_trade(struct game_s *g, player_id_t p1, player_id_t p2, int bc)
@@ -379,6 +387,7 @@ void game_diplo_set_trade(struct game_s *g, player_id_t p1, player_id_t p2, int 
     e2->trade_bc[p1] = bc;
     e2->trade_established_bc[p1] = bc;
     e2->trade_percent[p1] = v;
+    LOG_EVENT(g->year, "diplo_trade_set", "a=%i b=%i bc=%i percent=%i", p1, p2, bc, v);
 }
 
 void game_diplo_stop_war(struct game_s *g, player_id_t p1, player_id_t p2)

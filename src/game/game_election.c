@@ -12,6 +12,7 @@
 #include "game_str.h"
 #include "game_tech.h"
 #include "lib.h"
+#include "log.h"
 #include "ui.h"
 
 /* -------------------------------------------------------------------------- */
@@ -216,6 +217,7 @@ void game_election(struct game_s *g)
             game_diplo_act(g, 24, player, pfor, 0, 0, 0);
             game_diplo_act(g, -12, player, el->candidate[(votefor - 1) ^ 1], 0, 0, 0);
         }
+        LOG_EVENT(g->year, "election_vote", "voter=%i choice=%i votes=%i human=0", player, votefor, n);
         el->str = el->buf;
         el->ui_delay = 3;
         ui_election_show(el);
@@ -258,6 +260,7 @@ void game_election(struct game_s *g)
                 game_diplo_act(g, -12, player, pnot, 79, 0, pfor);
             }
         }
+        LOG_EVENT(g->year, "election_vote", "voter=%i choice=%i votes=%i human=1", player, votefor, n);
     }
     {
         int winner;
@@ -288,6 +291,7 @@ void game_election(struct game_s *g)
             el->str = game_str_el_neither;
             el->cur_i = PLAYER_NONE;
         }
+        LOG_EVENT(g->year, "election_result", "winner=%i votes0=%u votes1=%u total=%u", (winner < 2) ? el->candidate[winner] : PLAYER_NONE, el->got_votes[0], el->got_votes[1], el->total_votes);
         el->ui_delay = 3;
         ui_election_show(el);
     }

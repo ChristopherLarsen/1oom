@@ -214,6 +214,7 @@ void game_update_production(struct game_s *g)
                 /* BUG: deducting transport cost takes no effect for actual production,
                  * which happens after departure, but leads to wrong display for player. */
                 p->prod_after_maint = (v > 0) ? v : 0;
+                LOG_EVENT(g->year, "planet_produce", "id=%i owner=%i bc=%u", i, pi, p->prod_after_maint);
             }
         }
     }
@@ -249,6 +250,7 @@ void game_update_eco_on_waste(struct game_s *g, int player_i, bool force_adjust)
         if (p->owner == player_i) {
             uint16_t v;
             int16_t left;
+            int16_t eco_before = p->slider[PLANET_SLIDER_ECO];
             bool check_locks = !force_adjust && game_num_slider_respects_locks && IS_HUMAN(g, p->owner);
             v = game_planet_get_waste_percent(NULL, g, p, false);
             if (check_locks && p->slider_lock[PLANET_SLIDER_ECO]) {
@@ -294,6 +296,9 @@ void game_update_eco_on_waste(struct game_s *g, int player_i, bool force_adjust)
             SETMAX(left, 0);
             if (!check_locks || !p->slider_lock[PLANET_SLIDER_TECH]) {
                 p->slider[PLANET_SLIDER_TECH] = left;
+            }
+            if (p->slider[PLANET_SLIDER_ECO] != eco_before) {
+                LOG_EVENT(g->year, "eco_waste", "id=%i owner=%i from=%i to=%i force=%i", i, player_i, eco_before, p->slider[PLANET_SLIDER_ECO], force_adjust ? 1 : 0);
             }
         }
     }

@@ -791,6 +791,7 @@ void game_tech_get_new(struct game_s *g, player_id_t player, tech_field_t field,
         if (IS_HUMAN(g, player)) {
             game_tech_add_newtech(g, player, field, tech, source, a8, stolen_from, flag_frame);
         }
+        LOG_EVENT(g->year, "tech_invented", "owner=%i field=%i item=%u source=%i", player, field, tech, source);
         /*63899*/
         if (e->tech.project[field] == tech) {
             e->tech.project[field] = 0;

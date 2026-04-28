@@ -400,6 +400,7 @@ void game_event_new(struct game_s *g)
         default:
             break;
     }
+    LOG_EVENT(g->year, "random_event", "type=%i player=%i planet=%u", type, player, planet);
 }
 
 bool game_event_run(struct game_s *g, struct game_end_s *ge)

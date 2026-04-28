@@ -1,5 +1,6 @@
 #include "config.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -39,6 +40,8 @@ static bool game_opt_year_save_enabled = false;
 static bool game_opt_init_save_enabled = true;
 static bool game_opt_next_turn = false;
 static bool game_opt_save_quit = false;
+static const char *game_opt_ai_gate_path = 0;
+bool game_ai_gate_active = false;
 
 static struct game_end_s game_opt_end = { GAME_END_NONE, 0, 0, 0, 0 };
 static struct game_new_options_s game_opt_new = GAME_NEW_OPTS_DEFAULT;
@@ -53,9 +56,327 @@ bool game_opt_message_filter[FINISHED_NUM] = { false, false, false, false, false
 
 static struct game_s game;
 static struct game_aux_s game_aux;
+static const int game_ai_gate_turns[] = { 1, 5, 20, 50, 100 };
+static const int game_ai_gate_turns_num = sizeof(game_ai_gate_turns) / sizeof(game_ai_gate_turns[0]);
 
 
 /* -------------------------------------------------------------------------- */
+
+static int game_opt_set_ai_gate(char **argv, void *var)
+{
+    *(const char **)var = argv[1];
+    game_opt_skip_intro = true;
+    return 0;
+}
+
+static bool game_ai_gate_is_checkpoint_turn(int turn)
+{
+    for (int i = 0; i < game_ai_gate_turns_num; ++i) {
+        if (game_ai_gate_turns[i] == turn) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static shipsum_t game_ai_gate_sum_ships(const shipcount_t ships[NUM_SHIPDESIGNS])
+{
+    shipsum_t total = 0;
+    for (int i = 0; i < NUM_SHIPDESIGNS; ++i) {
+        total += ships[i];
+    }
+    return total;
+}
+
+static void game_ai_gate_write_int_array(FILE *f, const int *vals, int count)
+{
+    fputc('[', f);
+    for (int i = 0; i < count; ++i) {
+        if (i != 0) {
+            fputc(',', f);
+        }
+        fprintf(f, "%d", vals[i]);
+    }
+    fputc(']', f);
+}
+
+static void game_ai_gate_write_ship_array(FILE *f, const shipcount_t ships[NUM_SHIPDESIGNS])
+{
+    fputc('[', f);
+    for (int i = 0; i < NUM_SHIPDESIGNS; ++i) {
+        if (i != 0) {
+            fputc(',', f);
+        }
+        fprintf(f, "%u", ships[i]);
+    }
+    fputc(']', f);
+}
+
+static void game_ai_gate_write_meta(FILE *f, const struct game_s *g)
+{
+    fprintf(
+        f,
+        "\"meta\":{\"galaxy_seed\":%u,\"difficulty\":%d,\"galaxy_size\":%d,\"players\":%u,\"checkpoint_turns\":[1,5,20,50,100]}",
+        g->galaxy_seed,
+        g->difficulty,
+        g->galaxy_size,
+        g->players
+    );
+}
+
+static void game_ai_gate_write_empires(FILE *f, const struct game_s *g)
+{
+    fputs("\"empires\":[", f);
+    for (player_id_t pi = PLAYER_0; pi < g->players; ++pi) {
+        shipsum_t orbit_ships = 0;
+        shipsum_t enroute_ships = 0;
+        uint32_t transport_pop = 0;
+        int planet_count = 0;
+        int population = 0;
+        int factories = 0;
+        int bases = 0;
+        int tech_percent[TECH_FIELD_NUM];
+        int tech_completed[TECH_FIELD_NUM];
+        int tech_project[TECH_FIELD_NUM];
+        int treaties[PLAYER_NUM];
+        int trade_bc[PLAYER_NUM];
+        const empiretechorbit_t *e = &(g->eto[pi]);
+        const techdata_t *tech = &(e->tech);
+
+        for (int i = 0; i < g->galaxy_stars; ++i) {
+            const planet_t *p = &(g->planet[i]);
+            if (p->owner == pi) {
+                ++planet_count;
+                population += p->pop;
+                factories += p->factories;
+                bases += p->missile_bases;
+            }
+            orbit_ships += game_ai_gate_sum_ships(e->orbit[i].ships);
+        }
+        for (int i = 0; i < g->enroute_num; ++i) {
+            const fleet_enroute_t *r = &(g->enroute[i]);
+            if (r->owner == pi) {
+                enroute_ships += game_ai_gate_sum_ships(r->ships);
+            }
+        }
+        for (int i = 0; i < g->transport_num; ++i) {
+            const transport_t *t = &(g->transport[i]);
+            if (t->owner == pi) {
+                transport_pop += t->pop;
+            }
+        }
+        for (int field = 0; field < TECH_FIELD_NUM; ++field) {
+            tech_percent[field] = tech->percent[field];
+            tech_completed[field] = tech->completed[field];
+            tech_project[field] = tech->project[field];
+        }
+        for (int other = 0; other < g->players; ++other) {
+            treaties[other] = e->treaty[other];
+            trade_bc[other] = e->trade_bc[other];
+        }
+
+        if (pi != PLAYER_0) {
+            fputc(',', f);
+        }
+        fprintf(
+            f,
+            "{\"player\":%d,\"race\":%d,\"banner\":%d,\"is_ai\":%s,\"alive\":%s,\"home\":%u,"
+            "\"reserve_bc\":%u,\"total_production_bc\":%u,\"total_research_bc\":%u,"
+            "\"ship_maint_bc\":%u,\"bases_maint_bc\":%u,\"total_trade_bc\":%d,",
+            pi,
+            e->race,
+            e->banner,
+            BOOLVEC_IS1(g->is_ai, pi) ? "true" : "false",
+            (g->evn.home[pi] != PLANET_NONE) ? "true" : "false",
+            g->evn.home[pi],
+            e->reserve_bc,
+            e->total_production_bc,
+            e->total_research_bc,
+            e->ship_maint_bc,
+            e->bases_maint_bc,
+            e->total_trade_bc
+        );
+        fputs("\"tech_percent\":", f);
+        game_ai_gate_write_int_array(f, tech_percent, TECH_FIELD_NUM);
+        fputs(",\"tech_completed\":", f);
+        game_ai_gate_write_int_array(f, tech_completed, TECH_FIELD_NUM);
+        fputs(",\"tech_project\":", f);
+        game_ai_gate_write_int_array(f, tech_project, TECH_FIELD_NUM);
+        fprintf(
+            f,
+            ",\"planet_count\":%d,\"population\":%d,\"factories\":%d,\"bases\":%d,"
+            "\"orbit_ships\":%u,\"enroute_ships\":%u,\"transport_pop\":%u,",
+            planet_count,
+            population,
+            factories,
+            bases,
+            orbit_ships,
+            enroute_ships,
+            transport_pop
+        );
+        fputs("\"treaties\":", f);
+        game_ai_gate_write_int_array(f, treaties, g->players);
+        fputs(",\"trade_bc\":", f);
+        game_ai_gate_write_int_array(f, trade_bc, g->players);
+        fputc('}', f);
+    }
+    fputc(']', f);
+}
+
+static void game_ai_gate_write_planets(FILE *f, const struct game_s *g)
+{
+    fputs("\"planets\":[", f);
+    for (int i = 0; i < g->galaxy_stars; ++i) {
+        int slider[PLANET_SLIDER_NUM];
+        const planet_t *p = &(g->planet[i]);
+        for (int si = 0; si < PLANET_SLIDER_NUM; ++si) {
+            slider[si] = p->slider[si];
+        }
+        if (i != 0) {
+            fputc(',', f);
+        }
+        fprintf(
+            f,
+            "{\"planet\":%d,\"owner\":%d,\"claim\":%d,\"pop\":%d,\"factories\":%d,"
+            "\"bases\":%u,\"waste\":%d,\"buildship\":%u,\"reloc\":%u,"
+            "\"have_stargate\":%s,",
+            i,
+            p->owner,
+            p->claim,
+            p->pop,
+            p->factories,
+            p->missile_bases,
+            p->waste,
+            p->buildship,
+            p->reloc,
+            p->have_stargate ? "true" : "false"
+        );
+        fputs("\"slider\":", f);
+        game_ai_gate_write_int_array(f, slider, PLANET_SLIDER_NUM);
+        fprintf(f, ",\"trans_num\":%u,\"trans_dest\":%u}", p->trans_num, p->trans_dest);
+    }
+    fputc(']', f);
+}
+
+static void game_ai_gate_write_fleets(FILE *f, const struct game_s *g)
+{
+    bool first = true;
+    fputs("\"fleets\":{\"enroute\":[", f);
+    for (int i = 0; i < g->enroute_num; ++i) {
+        const fleet_enroute_t *r = &(g->enroute[i]);
+        if (!first) {
+            fputc(',', f);
+        }
+        first = false;
+        fprintf(f, "{\"owner\":%d,\"ships\":", r->owner);
+        game_ai_gate_write_ship_array(f, r->ships);
+        fprintf(
+            f,
+            ",\"x\":%u,\"y\":%u,\"dest\":%u,\"speed\":%u,\"eta_turns\":%d}",
+            r->x,
+            r->y,
+            r->dest,
+            r->speed,
+            game_calc_eta_trans(g, r->speed, r->x, r->y, g->planet[r->dest].x, g->planet[r->dest].y)
+        );
+    }
+    fputs("],\"orbit\":[", f);
+    first = true;
+    for (int pi = PLAYER_0; pi < g->players; ++pi) {
+        for (int planet_i = 0; planet_i < g->galaxy_stars; ++planet_i) {
+            const fleet_orbit_t *o = &(g->eto[pi].orbit[planet_i]);
+            if (game_ai_gate_sum_ships(o->ships) == 0) {
+                continue;
+            }
+            if (!first) {
+                fputc(',', f);
+            }
+            first = false;
+            fprintf(f, "{\"owner\":%d,\"ships\":", pi);
+            game_ai_gate_write_ship_array(f, o->ships);
+            fprintf(f, ",\"x\":%u,\"y\":%u,\"planet\":%d}", g->planet[planet_i].x, g->planet[planet_i].y, planet_i);
+        }
+    }
+    fputs("],\"transports\":[", f);
+    first = true;
+    for (int i = 0; i < g->transport_num; ++i) {
+        const transport_t *t = &(g->transport[i]);
+        if (!first) {
+            fputc(',', f);
+        }
+        first = false;
+        fprintf(
+            f,
+            "{\"owner\":%d,\"dest\":%u,\"x\":%u,\"y\":%u,\"speed\":%u,\"pop\":%u}",
+            t->owner,
+            t->dest,
+            t->x,
+            t->y,
+            t->speed,
+            t->pop
+        );
+    }
+    fputs("]}", f);
+}
+
+static void game_ai_gate_write_checkpoint(FILE *f, const struct game_s *g, int turn)
+{
+    fprintf(
+        f,
+        "{\"turn\":%d,\"year\":%u,\"rng_seed\":%u,\"end\":%d,\"winner\":%d,",
+        turn,
+        g->year + YEAR_BASE,
+        g->seed,
+        g->end,
+        g->winner
+    );
+    game_ai_gate_write_empires(f, g);
+    fputc(',', f);
+    game_ai_gate_write_planets(f, g);
+    fputc(',', f);
+    game_ai_gate_write_fleets(f, g);
+    fputc('}', f);
+}
+
+static int game_run_ai_gate(struct game_s *g, const char *path)
+{
+    struct game_end_s game_end = { GAME_END_NONE, 0, 0, 0, 0 };
+    FILE *f = fopen(path, "w");
+    bool first_checkpoint = true;
+
+    if (!f) {
+        log_error("Game: could not open ai gate output '%s'\n", path);
+        return -1;
+    }
+
+    for (player_id_t i = PLAYER_0; i < g->players; ++i) {
+        BOOLVEC_SET1(g->is_ai, i);
+    }
+
+    game_ai_gate_active = true;
+    fputc('{', f);
+    game_ai_gate_write_meta(f, g);
+    fputs(",\"checkpoints\":[", f);
+    for (int turn = 1; turn <= 100; ++turn) {
+        game_end = game_turn_process(g);
+        g->active_player = PLAYER_0;
+        if (game_ai_gate_is_checkpoint_turn(turn)) {
+            if (!first_checkpoint) {
+                fputc(',', f);
+            }
+            first_checkpoint = false;
+            game_ai_gate_write_checkpoint(f, g, turn);
+        }
+        if ((game_end.type != GAME_END_NONE) && (game_end.type != GAME_END_FINAL_WAR)) {
+            break;
+        }
+    }
+    game_ai_gate_active = false;
+    fputs("]}", f);
+    fclose(f);
+    log_message("Game: ai gate wrote %s\n", path);
+    return 0;
+}
 
 static void game_start(struct game_s *g)
 {
@@ -468,6 +789,9 @@ const struct cmdline_options_s main_cmdline_options[] = {
     { "-savequit", 0,
       options_enable_bool_var, (void *)&game_opt_save_quit,
       NULL, "Save and quit (for debugging)" },
+    { "--ai-gate", 1,
+      game_opt_set_ai_gate, (void *)&game_opt_ai_gate_path,
+      "OUTFILE", "Run 100 AI-only turns and dump checkpoint JSON to OUTFILE" },
     { 0, 0, 0, 0, 0, 0 }
 };
 
@@ -832,6 +1156,12 @@ int main_do(void)
         main_menu_start_game:
         game_aux_start(&game_aux, &game);
         game_start(&game);
+        if (game_opt_ai_gate_path) {
+            int ret = game_run_ai_gate(&game, game_opt_ai_gate_path);
+            game_opt_ai_gate_path = 0;
+            game_stop(&game);
+            return (ret == 0) ? 0 : 1;
+        }
         ui_game_start(&game);
         game_end.type = GAME_END_NONE;
         while ((game_end.type == GAME_END_NONE) || (game_end.type == GAME_END_FINAL_WAR)) {

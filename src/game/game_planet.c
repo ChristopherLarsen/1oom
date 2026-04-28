@@ -12,6 +12,7 @@
 #include "game_str.h"
 #include "game_tech.h"
 #include "lib.h"
+#include "log.h"
 #include "rnd.h"
 #include "types.h"
 
@@ -31,6 +32,7 @@ void game_planet_destroy(struct game_s *g, uint8_t planet_i, player_id_t attacke
 {
     planet_t *p = &(g->planet[planet_i]);
     player_id_t owner = p->owner;
+    LOG_EVENT(g->year, "planet_destroy", "id=%u owner=%i attacker=%i pop=%u factories=%u bases=%u", planet_i, owner, attacker, p->pop, p->factories, p->missile_bases);
     if (IS_PLAYER(g, owner)) {
         /* g->seen is not used by classical AI,
            so the original skips this for AI. */

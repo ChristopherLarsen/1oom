@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <string.h>
 
 #include "log.h"
 #ifdef FEATURE_MODEBUG
@@ -18,6 +19,7 @@
 static char msgbuf[MAX_MSG_LEN] = "";
 
 static FILE *log_fd = NULL;
+static FILE *trace_fd = NULL;
 
 /* ------------------------------------------------------------------------- */
 
@@ -51,6 +53,26 @@ void log_file_close(void)
     if (log_fd) {
         fclose(log_fd);
         log_fd = NULL;
+    }
+}
+
+int log_trace_open(const char *filename)
+{
+    if (filename && (filename[0] != '\0')) {
+        trace_fd = fopen(filename, "w");
+        if (!trace_fd) {
+            log_error("Trace: opening %s failed!\n", filename);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+void log_trace_close(void)
+{
+    if (trace_fd) {
+        fclose(trace_fd);
+        trace_fd = NULL;
     }
 }
 
@@ -131,6 +153,39 @@ void log_fatal_and_die(const char *format, ...)
     log_error_direct(msgbuf);
     raise(SIGINT);
     exit(EXIT_FAILURE);
+}
+
+void log_event(int turn, const char *name, const char *format, ...)
+{
+    va_list ap;
+    int len;
+
+    if (!trace_fd) {
+        return;
+    }
+
+    len = snprintf(msgbuf, MAX_MSG_LEN, "T%02i EVENT %s", turn, name ? name : "");
+    if ((format != NULL) && (format[0] != '\0') && (len < (MAX_MSG_LEN - 2))) {
+        msgbuf[len++] = ' ';
+        va_start(ap, format);
+        vsnprintf(&msgbuf[len], MAX_MSG_LEN - len, format, ap);
+        va_end(ap);
+    }
+    len = strlen(msgbuf);
+    if (len < (MAX_MSG_LEN - 1)) {
+        msgbuf[len++] = '\n';
+        msgbuf[len] = '\0';
+    } else {
+        msgbuf[MAX_MSG_LEN - 2] = '\n';
+        msgbuf[MAX_MSG_LEN - 1] = '\0';
+    }
+    if (fputs(msgbuf, trace_fd) < 0) {
+        log_trace_close();
+        log_error("Trace: writing failed!\n");
+    } else if (fflush(trace_fd) != 0) {
+        log_trace_close();
+        log_error("Trace: flush failed!\n");
+    }
 }
 
 #ifdef FEATURE_MODEBUG

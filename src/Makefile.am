@@ -1,4 +1,5 @@
 bin_PROGRAMS =
+bin_PROGRAMS += 1oom_oracle
 if COMPILE_UICMDLINE
 bin_PROGRAMS += 1oom_cmdline
 endif
@@ -117,6 +118,8 @@ common_libs = @OS_LIBS@
 game_lib = $(top_builddir)/src/game/libgame.a
 gamemain_lib = $(top_builddir)/src/game/libgamemain.a
 gamesaveconv_lib = $(top_builddir)/src/game/libgamesaveconv.a
+
+1oom_oracle_SOURCES = oracle/oracle.c
 
 uicmdline_lib = $(top_builddir)/src/ui/cmdline/libuicmdline.a
 hwnop_lib = $(top_builddir)/src/hw/nop/libhwnop.a

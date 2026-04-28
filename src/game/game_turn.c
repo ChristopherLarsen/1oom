@@ -39,6 +39,32 @@
 /* -------------------------------------------------------------------------- */
 
 int copyprot_status = 0;
+extern bool game_ai_gate_active;
+
+static void game_turn_trace_ships(char *buf, int buflen, const shipcount_t ships[NUM_SHIPDESIGNS])
+{
+    int pos = 0;
+    if (buflen <= 0) {
+        return;
+    }
+    pos = snprintf(buf, buflen, "[");
+    for (int i = 0; i < NUM_SHIPDESIGNS; ++i) {
+        int wrote;
+        if (pos >= buflen) {
+            break;
+        }
+        wrote = snprintf(&buf[pos], buflen - pos, "%s%u", (i == 0) ? "" : ",", ships[i]);
+        if (wrote < 0) {
+            break;
+        }
+        pos += wrote;
+    }
+    if (pos < buflen) {
+        snprintf(&buf[pos], buflen - pos, "]");
+    } else {
+        buf[buflen - 1] = '\0';
+    }
+}
 
 static void game_turn_limit_ships(struct game_s *g)
 {
@@ -198,8 +224,11 @@ static void game_turn_build_eco(struct game_s *g)
     for (int i = 0; i < g->galaxy_stars; ++i) {
         planet_t *p = &(g->planet[i]);
         player_id_t owner;
+        int pop_before, waste_before;
         owner = p->owner;
         p->pop_prev = (owner != PLAYER_NONE) ? p->pop : 0;
+        pop_before = p->pop;
+        waste_before = p->waste;
         if ((owner != PLAYER_NONE) && (p->type != PLANET_TYPE_NOT_HABITABLE) && (p->pop != 0)) {
             const empiretechorbit_t *e;
             int ecorestore, ecoprod;
@@ -296,6 +325,15 @@ static void game_turn_build_eco(struct game_s *g)
                 p->pop_tenths = v % 10;
             }
             SETRANGE(p->pop, 0, p->max_pop3);
+            if (p->pop != pop_before) {
+                LOG_EVENT(g->year, "planet_grow", "id=%i owner=%i from=%i to=%i", i, owner, pop_before, p->pop);
+            }
+            if (p->waste != waste_before) {
+                LOG_EVENT(g->year, "eco_waste", "id=%i owner=%i from=%i to=%i", i, owner, waste_before, p->waste);
+            }
+            if ((p->pop != pop_before) || (p->waste != waste_before)) {
+                LOG_EVENT(g->year, "build_eco", "id=%i owner=%i pop_from=%i pop_to=%i waste_from=%i waste_to=%i", i, owner, pop_before, p->pop, waste_before, p->waste);
+            }
         }
     }
 }
@@ -471,6 +509,8 @@ static void game_turn_build_def(struct game_s *g)
         if (owner != PLAYER_NONE) {
             empiretechorbit_t *e = &(g->eto[owner]);
             int prod, toup;
+            uint16_t bases_before = p->missile_bases;
+            uint8_t shield_before = p->shield;
             prod = game_adjust_prod_by_special((p->slider[PLANET_SLIDER_DEF] * p->prod_after_maint) / 100, p->special);
             prod += p->bc_to_base;
             toup = cost_diff[owner] * p->missile_bases + p->bc_upgrade_base;
@@ -515,6 +555,9 @@ static void game_turn_build_def(struct game_s *g)
                         game_add_planet_to_shield_finished(g, i, owner);
                     }
                 }
+            }
+            if ((p->missile_bases != bases_before) || (p->shield != shield_before)) {
+                LOG_EVENT(g->year, "build_def", "id=%i owner=%i bases_from=%u bases_to=%u shield_from=%u shield_to=%u", i, owner, bases_before, p->missile_bases, shield_before, p->shield);
             }
         }
     }
@@ -594,6 +637,9 @@ static void game_turn_build_ship(struct game_s *g)
                     }
                 }
                 g->evn.new_ships[owner][si] += shipnum;
+                if (shipnum > 0) {
+                    LOG_EVENT(g->year, "build_ship", "id=%i owner=%i slot=%u num=%i", i, owner, si, shipnum);
+                }
                 p->bc_to_ship = prod;
             }
         }
@@ -609,6 +655,7 @@ static void game_turn_reserve(struct game_s *g)
         owner = p->owner;
         if (owner != PLAYER_NONE) {
             uint32_t v, r;
+            uint32_t reserve_before = p->reserve;
             v = p->prod_after_maint / 2;
             r = p->reserve;
             if (v < r) {
@@ -617,11 +664,16 @@ static void game_turn_reserve(struct game_s *g)
                 r = 0;
             }
             p->reserve = r;
+            if (p->reserve != reserve_before) {
+                LOG_EVENT(g->year, "reserve_planet", "id=%i owner=%i from=%u to=%u", i, owner, reserve_before, p->reserve);
+            }
         }
     }
     for (player_id_t i = PLAYER_0; i < g->players; ++i) {
         empiretechorbit_t *e = &(g->eto[i]);
-        e->reserve_bc += (e->total_production_bc * e->tax) / 2000;
+        uint32_t add_bc = (e->total_production_bc * e->tax) / 2000;
+        e->reserve_bc += add_bc;
+        LOG_EVENT(g->year, "reserve_empire", "owner=%i bc=%u to=%u", i, add_bc, e->reserve_bc);
     }
 }
 
@@ -736,6 +788,9 @@ static void game_turn_build_ind(struct game_s *g)
             fact += num;
             SETMIN(fact, game_num_max_factories);
             p->factories = fact;
+            if (p->factories != factold) {
+                LOG_EVENT(g->year, "build_ind", "id=%i owner=%i from=%u to=%u", i, owner, factold, p->factories);
+            }
             if ((fact != factold) && (fact >= (p->max_pop3 * e->colonist_oper_factories))) {
                 if (IS_HUMAN(g, owner) && (p->slider[PLANET_SLIDER_IND] > 0)) {
                     game_turn_finished_disable_slider(g, p, PLANET_SLIDER_IND, false);
@@ -863,13 +918,16 @@ static void game_turn_move_ships(struct game_s *g)
         p = &(g->planet[r->dest]);
         if ((r->x == p->x) && (r->y == p->y)) {
             fleet_orbit_t *o;
+            char ships_buf[64];
             o = &(g->eto[r->owner].orbit[r->dest]);
+            game_turn_trace_ships(ships_buf, sizeof(ships_buf), r->ships);
             for (int j = 0; j < NUM_SHIPDESIGNS; ++j) {
                 uint32_t s;
                 s = o->ships[j] + r->ships[j];
                 SETMIN(s, game_num_limit_ships);
                 o->ships[j] = s;
             }
+            LOG_EVENT(g->year, "fleet_arrive", "id=%i owner=%i dest=%u ships=%s", i, r->owner, r->dest, ships_buf);
             util_table_remove_item_any_order(i, g->enroute, sizeof(fleet_enroute_t), g->enroute_num);
             --g->enroute_num;
             --i;
@@ -1374,6 +1432,9 @@ static bool game_turn_check_end(struct game_s *g, struct game_end_s *ge)
             return true;
         }
         if (!human_alive) {
+            if (game_ai_gate_active) {
+                return false;
+            }
             struct news_s ns;
             int killer = g->gaux->human_killer;
             if (killer >= g->players) {
