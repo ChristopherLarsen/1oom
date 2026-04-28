@@ -1,7 +1,9 @@
 #include "config.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #ifdef HAVE_SDLMAIN
 #include "SDL_main.h"
@@ -196,6 +198,7 @@ static inline uint32_t mod_xlat(SDL_Keymod smod)
 
 static bool hw_textinput_active = false;
 static bool hw_key_press_repeat_active = true;
+extern const char *main_replay_file;
 
 /* -------------------------------------------------------------------------- */
 
@@ -237,6 +240,623 @@ static void hw_event_handle_window(SDL_WindowEvent *e)
 
 /* -------------------------------------------------------------------------- */
 
+enum replay_op_e {
+    REPLAY_OP_LOAD,
+    REPLAY_OP_WAIT,
+    REPLAY_OP_KEY,
+    REPLAY_OP_KEYDOWN,
+    REPLAY_OP_KEYUP,
+    REPLAY_OP_CLICK,
+    REPLAY_OP_RCLICK,
+    REPLAY_OP_MOVE,
+    REPLAY_OP_SCREENSHOT,
+    REPLAY_OP_ASSERT_TURN,
+    REPLAY_OP_END
+};
+
+struct replay_key_s {
+    mookey_t key;
+    char c;
+};
+
+struct replay_op_s {
+    enum replay_op_e op;
+    int line;
+    int a;
+    int b;
+    char *text;
+    struct replay_key_s key;
+};
+
+static struct replay_state_s {
+    bool active;
+    struct replay_op_s *ops;
+    int num_ops;
+    int cap_ops;
+    int pos;
+    int wait_frames;
+    char **keymap_names;
+    int num_keymap_names;
+} replay;
+
+static void replay_free(void)
+{
+    for (int i = 0; i < replay.num_ops; ++i) {
+        free(replay.ops[i].text);
+    }
+    free(replay.ops);
+    replay.ops = NULL;
+    replay.num_ops = 0;
+    replay.cap_ops = 0;
+    for (int i = 0; i < replay.num_keymap_names; ++i) {
+        free(replay.keymap_names[i]);
+    }
+    free(replay.keymap_names);
+    replay.keymap_names = NULL;
+    replay.num_keymap_names = 0;
+}
+
+static char *replay_strdup(const char *s)
+{
+    size_t len = strlen(s);
+    char *out = malloc(len + 1);
+    if (out != NULL) {
+        memcpy(out, s, len + 1);
+    }
+    return out;
+}
+
+static char *replay_concat3(const char *a, const char *b, const char *c)
+{
+    size_t alen = strlen(a);
+    size_t blen = strlen(b);
+    size_t clen = strlen(c);
+    char *out = malloc(alen + blen + clen + 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    memcpy(out, a, alen);
+    memcpy(out + alen, b, blen);
+    memcpy(out + alen + blen, c, clen + 1);
+    return out;
+}
+
+static char *replay_dirname(const char *path)
+{
+    const char *slash = strrchr(path, '/');
+#ifdef _WIN32
+    const char *backslash = strrchr(path, '\\');
+    if ((slash == NULL) || ((backslash != NULL) && (backslash > slash))) {
+        slash = backslash;
+    }
+#endif
+    if (slash == NULL) {
+        return replay_strdup(".");
+    }
+    {
+        size_t len = (size_t)(slash - path);
+        char *out = malloc(len + 1);
+        if (out == NULL) {
+            return NULL;
+        }
+        memcpy(out, path, len);
+        out[len] = '\0';
+        return out;
+    }
+}
+
+static FILE *replay_open_existing(const char *path)
+{
+    return fopen(path, "r");
+}
+
+static char *replay_find_keymap(const char *replay_filename)
+{
+    FILE *fd;
+    char *dir;
+    char *candidate;
+
+    fd = replay_open_existing("tools/replay/keymap.txt");
+    if (fd != NULL) {
+        fclose(fd);
+        return replay_strdup("tools/replay/keymap.txt");
+    }
+    dir = replay_dirname(replay_filename);
+    if (dir == NULL) {
+        return NULL;
+    }
+    candidate = replay_concat3(dir, "/", "keymap.txt");
+    if (candidate != NULL) {
+        fd = replay_open_existing(candidate);
+        if (fd != NULL) {
+            fclose(fd);
+            free(dir);
+            return candidate;
+        }
+        free(candidate);
+    }
+    candidate = replay_concat3(dir, "/../", "keymap.txt");
+    if (candidate != NULL) {
+        fd = replay_open_existing(candidate);
+        if (fd != NULL) {
+            fclose(fd);
+            free(dir);
+            return candidate;
+        }
+        free(candidate);
+    }
+    free(dir);
+    return NULL;
+}
+
+static int replay_load_keymap(const char *replay_filename)
+{
+    char line[256];
+    char *keymap_path = replay_find_keymap(replay_filename);
+    FILE *fd;
+    if (keymap_path == NULL) {
+        log_error("Replay: could not find tools/replay/keymap.txt\n");
+        return -1;
+    }
+    fd = fopen(keymap_path, "r");
+    if (fd == NULL) {
+        log_error("Replay: could not open keymap '%s'\n", keymap_path);
+        free(keymap_path);
+        return -1;
+    }
+    while (fgets(line, sizeof(line), fd) != NULL) {
+        char *sdl_name;
+        char *godot_name;
+        char **names_new;
+        line[strcspn(line, "\r\n")] = '\0';
+        sdl_name = strtok(line, " \t");
+        if ((sdl_name == NULL) || (sdl_name[0] == '#')) {
+            continue;
+        }
+        godot_name = strtok(NULL, " \t");
+        if (godot_name == NULL) {
+            log_error("Replay: malformed keymap '%s'\n", keymap_path);
+            fclose(fd);
+            free(keymap_path);
+            return -1;
+        }
+        names_new = realloc(replay.keymap_names, sizeof(*names_new) * (replay.num_keymap_names + 1));
+        if (names_new == NULL) {
+            fclose(fd);
+            free(keymap_path);
+            return -1;
+        }
+        replay.keymap_names = names_new;
+        replay.keymap_names[replay.num_keymap_names] = replay_strdup(sdl_name);
+        if (replay.keymap_names[replay.num_keymap_names] == NULL) {
+            fclose(fd);
+            free(keymap_path);
+            return -1;
+        }
+        ++replay.num_keymap_names;
+    }
+    fclose(fd);
+    free(keymap_path);
+    return 0;
+}
+
+static bool replay_keymap_has(const char *name)
+{
+    for (int i = 0; i < replay.num_keymap_names; ++i) {
+        if (strcmp(name, replay.keymap_names[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool replay_key_lookup(const char *name, struct replay_key_s *out)
+{
+    out->c = 0;
+    if ((name[0] >= 'A') && (name[0] <= 'Z') && (name[1] == '\0')) {
+        out->key = (mookey_t)(MOO_KEY_a + (name[0] - 'A'));
+        out->c = (char)tolower((unsigned char)name[0]);
+        return true;
+    }
+    if ((name[0] >= '0') && (name[0] <= '9') && (name[1] == '\0')) {
+        out->key = (mookey_t)(MOO_KEY_0 + (name[0] - '0'));
+        out->c = name[0];
+        return true;
+    }
+    if ((name[0] == 'F') && isdigit((unsigned char)name[1])) {
+        char *endptr = NULL;
+        long fnum = strtol(name + 1, &endptr, 10);
+        if ((endptr != NULL) && (*endptr == '\0') && (fnum >= 1) && (fnum <= 12)) {
+            out->key = (mookey_t)(MOO_KEY_F1 + fnum - 1);
+            return true;
+        }
+    }
+    if (strcmp(name, "ESCAPE") == 0) {
+        out->key = MOO_KEY_ESCAPE;
+        out->c = (char)MOO_KEY_ESCAPE;
+        return true;
+    }
+    if (strcmp(name, "RETURN") == 0) {
+        out->key = MOO_KEY_RETURN;
+        out->c = (char)MOO_KEY_RETURN;
+        return true;
+    }
+    if (strcmp(name, "UP") == 0) {
+        out->key = MOO_KEY_UP;
+        return true;
+    }
+    if (strcmp(name, "DOWN") == 0) {
+        out->key = MOO_KEY_DOWN;
+        return true;
+    }
+    if (strcmp(name, "LEFT") == 0) {
+        out->key = MOO_KEY_LEFT;
+        return true;
+    }
+    if (strcmp(name, "RIGHT") == 0) {
+        out->key = MOO_KEY_RIGHT;
+        return true;
+    }
+    if (strcmp(name, "SLASH") == 0) {
+        out->key = MOO_KEY_SLASH;
+        out->c = '/';
+        return true;
+    }
+    return false;
+}
+
+static int replay_add_op(struct replay_op_s *op)
+{
+    if (replay.num_ops >= replay.cap_ops) {
+        int cap_new = (replay.cap_ops == 0) ? 32 : replay.cap_ops * 2;
+        struct replay_op_s *ops_new = realloc(replay.ops, sizeof(*ops_new) * cap_new);
+        if (ops_new == NULL) {
+            return -1;
+        }
+        replay.ops = ops_new;
+        replay.cap_ops = cap_new;
+    }
+    replay.ops[replay.num_ops++] = *op;
+    return 0;
+}
+
+static int replay_parse_int(const char *text, int *out)
+{
+    char *endptr = NULL;
+    long value = strtol(text, &endptr, 10);
+    if ((endptr == NULL) || (*endptr != '\0') || (value < 0) || (value > 1000000000L)) {
+        return -1;
+    }
+    *out = (int)value;
+    return 0;
+}
+
+static int replay_split_line(char *line, char **tokens, int max_tokens)
+{
+    int count = 0;
+    char *p = line;
+    while (*p != '\0') {
+        while ((*p == ' ') || (*p == '\t')) {
+            ++p;
+        }
+        if ((*p == '\0') || (*p == '#')) {
+            break;
+        }
+        if (count >= max_tokens) {
+            return -1;
+        }
+        if (*p == '"') {
+            tokens[count++] = ++p;
+            while ((*p != '\0') && (*p != '"')) {
+                ++p;
+            }
+            if (*p != '"') {
+                return -1;
+            }
+            *p++ = '\0';
+        } else {
+            tokens[count++] = p;
+            while ((*p != '\0') && (*p != ' ') && (*p != '\t') && (*p != '#')) {
+                ++p;
+            }
+            if (*p == '#') {
+                *p = '\0';
+                break;
+            }
+            if (*p != '\0') {
+                *p++ = '\0';
+            }
+        }
+    }
+    return count;
+}
+
+static int replay_parse_file(const char *filename)
+{
+    FILE *fd;
+    char line[1024];
+    bool header_seen = false;
+    bool load_seen = false;
+    bool end_seen = false;
+    bool held_keys[256] = { false };
+    int line_no = 0;
+
+    if (replay_load_keymap(filename) != 0) {
+        return -1;
+    }
+    fd = fopen(filename, "r");
+    if (fd == NULL) {
+        log_error("Replay: could not open '%s'\n", filename);
+        return -1;
+    }
+    while (fgets(line, sizeof(line), fd) != NULL) {
+        char *tokens[4];
+        int token_count;
+        struct replay_op_s op;
+        ++line_no;
+        if (strchr(line, '\n') == NULL && !feof(fd)) {
+            log_error("Replay: %s:%i line is too long\n", filename, line_no);
+            fclose(fd);
+            return -1;
+        }
+        line[strcspn(line, "\r\n")] = '\0';
+        {
+            char *p = line;
+            while ((*p == ' ') || (*p == '\t')) {
+                ++p;
+            }
+            if (*p == '\0') {
+                continue;
+            }
+            if (*p == '#') {
+                if (strcmp(p, "# 1oom-godot-replay v1") == 0) {
+                    header_seen = true;
+                }
+                continue;
+            }
+        }
+        token_count = replay_split_line(line, tokens, 4);
+        if (token_count < 0) {
+            log_error("Replay: %s:%i cannot parse line\n", filename, line_no);
+            fclose(fd);
+            return -1;
+        }
+        if (token_count == 0) {
+            continue;
+        }
+        if (end_seen) {
+            log_error("Replay: %s:%i operation appears after END\n", filename, line_no);
+            fclose(fd);
+            return -1;
+        }
+        memset(&op, 0, sizeof(op));
+        op.line = line_no;
+        if (strcmp(tokens[0], "LOAD") == 0) {
+            if (token_count != 2 || load_seen) {
+                log_error("Replay: %s:%i malformed LOAD\n", filename, line_no);
+                fclose(fd);
+                return -1;
+            }
+            {
+                FILE *load_fd = fopen(tokens[1], "rb");
+                if (load_fd == NULL) {
+                    log_error("Replay: %s:%i LOAD fixture does not exist: %s\n", filename, line_no, tokens[1]);
+                    fclose(fd);
+                    return -1;
+                }
+                fclose(load_fd);
+            }
+            op.op = REPLAY_OP_LOAD;
+            op.text = replay_strdup(tokens[1]);
+            load_seen = true;
+        } else if (strcmp(tokens[0], "WAIT") == 0 || strcmp(tokens[0], "ASSERT_TURN") == 0) {
+            if (token_count != 2 || replay_parse_int(tokens[1], &op.a) != 0) {
+                log_error("Replay: %s:%i malformed %s\n", filename, line_no, tokens[0]);
+                fclose(fd);
+                return -1;
+            }
+            op.op = (strcmp(tokens[0], "WAIT") == 0) ? REPLAY_OP_WAIT : REPLAY_OP_ASSERT_TURN;
+        } else if (strcmp(tokens[0], "KEY") == 0 || strcmp(tokens[0], "KEYDOWN") == 0 || strcmp(tokens[0], "KEYUP") == 0) {
+            if (token_count != 2 || !replay_keymap_has(tokens[1]) || !replay_key_lookup(tokens[1], &op.key)) {
+                log_error("Replay: %s:%i unknown or unsupported key '%s'\n", filename, line_no, token_count >= 2 ? tokens[1] : "");
+                fclose(fd);
+                return -1;
+            }
+            if (strcmp(tokens[0], "KEY") == 0) {
+                op.op = REPLAY_OP_KEY;
+                if (held_keys[op.key.key]) {
+                    log_error("Replay: %s:%i KEY used while key is held\n", filename, line_no);
+                    fclose(fd);
+                    return -1;
+                }
+            } else if (strcmp(tokens[0], "KEYDOWN") == 0) {
+                op.op = REPLAY_OP_KEYDOWN;
+                if (held_keys[op.key.key]) {
+                    log_error("Replay: %s:%i KEYDOWN repeats a held key\n", filename, line_no);
+                    fclose(fd);
+                    return -1;
+                }
+                held_keys[op.key.key] = true;
+            } else {
+                op.op = REPLAY_OP_KEYUP;
+                if (!held_keys[op.key.key]) {
+                    log_error("Replay: %s:%i KEYUP has no matching KEYDOWN\n", filename, line_no);
+                    fclose(fd);
+                    return -1;
+                }
+                held_keys[op.key.key] = false;
+            }
+        } else if (strcmp(tokens[0], "CLICK") == 0 || strcmp(tokens[0], "RCLICK") == 0 || strcmp(tokens[0], "MOVE") == 0) {
+            if (token_count != 3 || replay_parse_int(tokens[1], &op.a) != 0 || replay_parse_int(tokens[2], &op.b) != 0
+              || op.a < 0 || op.a >= 320 || op.b < 0 || op.b >= 200) {
+                log_error("Replay: %s:%i malformed coordinates\n", filename, line_no);
+                fclose(fd);
+                return -1;
+            }
+            if (strcmp(tokens[0], "CLICK") == 0) {
+                op.op = REPLAY_OP_CLICK;
+            } else if (strcmp(tokens[0], "RCLICK") == 0) {
+                op.op = REPLAY_OP_RCLICK;
+            } else {
+                op.op = REPLAY_OP_MOVE;
+            }
+        } else if (strcmp(tokens[0], "SCREENSHOT") == 0) {
+            size_t len;
+            if (token_count != 2) {
+                log_error("Replay: %s:%i malformed SCREENSHOT\n", filename, line_no);
+                fclose(fd);
+                return -1;
+            }
+            len = strlen(tokens[1]);
+            if (len < 5 || strcmp(tokens[1] + len - 4, ".png") != 0) {
+                log_error("Replay: %s:%i SCREENSHOT path must end in .png\n", filename, line_no);
+                fclose(fd);
+                return -1;
+            }
+            op.op = REPLAY_OP_SCREENSHOT;
+            op.text = replay_strdup(tokens[1]);
+        } else if (strcmp(tokens[0], "END") == 0) {
+            if (token_count != 1) {
+                log_error("Replay: %s:%i malformed END\n", filename, line_no);
+                fclose(fd);
+                return -1;
+            }
+            op.op = REPLAY_OP_END;
+            end_seen = true;
+        } else {
+            log_error("Replay: %s:%i unknown op '%s'\n", filename, line_no, tokens[0]);
+            fclose(fd);
+            return -1;
+        }
+        if (!load_seen && op.op != REPLAY_OP_LOAD) {
+            log_error("Replay: %s:%i %s appears before LOAD\n", filename, line_no, tokens[0]);
+            fclose(fd);
+            return -1;
+        }
+        if ((op.text == NULL) && (op.op == REPLAY_OP_LOAD || op.op == REPLAY_OP_SCREENSHOT)) {
+            fclose(fd);
+            return -1;
+        }
+        if (replay_add_op(&op) != 0) {
+            log_error("Replay: could not allocate op list\n");
+            free(op.text);
+            fclose(fd);
+            return -1;
+        }
+    }
+    fclose(fd);
+    if (!header_seen) {
+        log_error("Replay: %s: missing supported header comment: # 1oom-godot-replay v1\n", filename);
+        return -1;
+    }
+    if (!load_seen) {
+        log_error("Replay: %s: missing LOAD operation\n", filename);
+        return -1;
+    }
+    if (!end_seen) {
+        log_error("Replay: %s: missing END operation\n", filename);
+        return -1;
+    }
+    for (int i = 0; i < 256; ++i) {
+        if (held_keys[i]) {
+            log_error("Replay: %s: keys still pressed at END\n", filename);
+            return -1;
+        }
+    }
+    replay.active = true;
+    replay.pos = 0;
+    replay.wait_frames = -1;
+    return 0;
+}
+
+static void replay_key_event(struct replay_key_s key, bool down)
+{
+    if (down) {
+        kbd_add_keypress(key.key, 0, key.c);
+    }
+    kbd_set_pressed(key.key, 0, down);
+}
+
+static void replay_mouse_move(int x, int y)
+{
+    mouse_set_xy_from_hw(x, y);
+}
+
+static void replay_mouse_click(int x, int y, int button)
+{
+    replay_mouse_move(x, y);
+    hw_mouse_grab();
+    hw_mouse_button(button, true);
+    hw_mouse_button(button, false);
+}
+
+static void replay_step(void)
+{
+    if (!replay.active) {
+        return;
+    }
+    while (replay.pos < replay.num_ops) {
+        struct replay_op_s *op = &replay.ops[replay.pos];
+        switch (op->op) {
+            case REPLAY_OP_LOAD:
+                ++replay.pos;
+                break;
+            case REPLAY_OP_WAIT:
+                if (replay.wait_frames < 0) {
+                    replay.wait_frames = op->a;
+                }
+                if (replay.wait_frames > 0) {
+                    --replay.wait_frames;
+                    return;
+                }
+                replay.wait_frames = -1;
+                ++replay.pos;
+                break;
+            case REPLAY_OP_KEY:
+                replay_key_event(op->key, true);
+                replay_key_event(op->key, false);
+                ++replay.pos;
+                return;
+            case REPLAY_OP_KEYDOWN:
+                replay_key_event(op->key, true);
+                ++replay.pos;
+                return;
+            case REPLAY_OP_KEYUP:
+                replay_key_event(op->key, false);
+                ++replay.pos;
+                return;
+            case REPLAY_OP_CLICK:
+                replay_mouse_click(op->a, op->b, SDL_BUTTON_LEFT);
+                ++replay.pos;
+                return;
+            case REPLAY_OP_RCLICK:
+                replay_mouse_click(op->a, op->b, SDL_BUTTON_RIGHT);
+                ++replay.pos;
+                return;
+            case REPLAY_OP_MOVE:
+                replay_mouse_move(op->a, op->b);
+                ++replay.pos;
+                return;
+            case REPLAY_OP_SCREENSHOT:
+                if (hw_video_screenshot_png(op->text) != 0) {
+                    exit(EXIT_FAILURE);
+                }
+                ++replay.pos;
+                break;
+            case REPLAY_OP_ASSERT_TURN:
+                log_error("Replay: %s:%i ASSERT_TURN is not implemented in the SDL2 backend\n", main_replay_file, op->line);
+                exit(EXIT_FAILURE);
+                break;
+            case REPLAY_OP_END:
+                log_message("Replay: END\n");
+                exit(EXIT_SUCCESS);
+                break;
+        }
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+
 int main(int argc, char **argv)
 {
     return main_1oom(argc, argv);
@@ -259,6 +879,13 @@ int hw_init(void)
         return 12;
     }
     build_key_xlat();
+    if (main_replay_file != NULL) {
+        if (replay_parse_file(main_replay_file) != 0) {
+            replay_free();
+            return 13;
+        }
+        log_message("Replay: loaded '%s'\n", main_replay_file);
+    }
     if (hw_opt_relmouse) {
         SDL_EventState(SDL_MOUSEMOTION, SDL_IGNORE);
     }
@@ -267,6 +894,7 @@ int hw_init(void)
 
 void hw_shutdown(void)
 {
+    replay_free();
     hw_audio_shutdown();
     hw_video_shutdown();
     log_message("SDL_Quit\n");
@@ -289,6 +917,7 @@ int hw_event_handle(void)
 {
     SDL_Event e;
 
+    replay_step();
     SDL_PumpEvents();
 
     while (SDL_PollEvent(&e)) {

@@ -8,6 +8,7 @@
 #include "gameapi.h"
 #include "hw.h"
 #include "lbx.h"
+#include "lib.h"
 #include "log.h"
 #include "options.h"
 #include "os.h"
@@ -18,6 +19,7 @@
 /* -------------------------------------------------------------------------- */
 
 static bool main_startup_ok = false;
+const char *main_replay_file = NULL;
 
 /* -------------------------------------------------------------------------- */
 
@@ -61,12 +63,95 @@ static void main_shutdown(void)
 
 /* -------------------------------------------------------------------------- */
 
+static char *main_replay_extract_load(const char *replay_filename)
+{
+    FILE *fd;
+    char line[1024];
+    char *load_filename = NULL;
+    bool header_seen = false;
+    int line_no = 0;
+
+    fd = fopen(replay_filename, "r");
+    if (fd == NULL) {
+        log_error("Replay: could not open '%s'\n", replay_filename);
+        return NULL;
+    }
+
+    while (fgets(line, sizeof(line), fd) != NULL) {
+        char *p;
+        char *op;
+        char *arg;
+        ++line_no;
+        if (strchr(line, '\n') == NULL && !feof(fd)) {
+            log_error("Replay: %s:%i line is too long\n", replay_filename, line_no);
+            lib_free(load_filename);
+            fclose(fd);
+            return NULL;
+        }
+        line[strcspn(line, "\r\n")] = '\0';
+        p = line;
+        while ((*p == ' ') || (*p == '\t')) {
+            ++p;
+        }
+        if (*p == '\0') {
+            continue;
+        }
+        if (*p == '#') {
+            if (strcmp(p, "# 1oom-godot-replay v1") == 0) {
+                header_seen = true;
+            }
+            continue;
+        }
+        {
+            char *comment = strchr(p, '#');
+            if (comment != NULL) {
+                *comment = '\0';
+            }
+        }
+        op = strtok(p, " \t");
+        if (op == NULL) {
+            continue;
+        }
+        arg = strtok(NULL, " \t");
+        if (strcmp(op, "LOAD") == 0) {
+            if (load_filename != NULL) {
+                log_error("Replay: %s:%i duplicate LOAD\n", replay_filename, line_no);
+                lib_free(load_filename);
+                fclose(fd);
+                return NULL;
+            }
+            if (arg == NULL) {
+                log_error("Replay: %s:%i LOAD is missing the fixture path\n", replay_filename, line_no);
+                fclose(fd);
+                return NULL;
+            }
+            if ((arg[0] == '"') && (arg[strlen(arg) - 1] == '"')) {
+                arg[strlen(arg) - 1] = '\0';
+                ++arg;
+            }
+            load_filename = lib_stralloc(arg);
+        }
+    }
+
+    fclose(fd);
+    if (!header_seen) {
+        log_error("Replay: %s: missing supported header comment: # 1oom-godot-replay v1\n", replay_filename);
+        lib_free(load_filename);
+        return NULL;
+    }
+    if (load_filename == NULL) {
+        log_error("Replay: %s: missing LOAD operation\n", replay_filename);
+    }
+    return load_filename;
+}
+
 static int main_filter_trace_args(int argc, char **argv, int *argc_out, char ***argv_out, const char **trace_filename_out)
 {
     char **argv_filtered;
     int argc_filtered = 0;
+    char *replay_load_filename = NULL;
 
-    argv_filtered = malloc(sizeof(*argv_filtered) * (argc + 1));
+    argv_filtered = malloc(sizeof(*argv_filtered) * (argc + 3));
     if (argv_filtered == NULL) {
         log_error("Trace: could not allocate argv filter\n");
         return -1;
@@ -83,7 +168,32 @@ static int main_filter_trace_args(int argc, char **argv, int *argc_out, char ***
             ++i;
             continue;
         }
+        if (strcmp(argv[i], "-replay") == 0) {
+            if ((i + 1) >= argc) {
+                log_error("option '-replay' is missing the parameter\n");
+                free(argv_filtered);
+                return -1;
+            }
+            if (main_replay_file != NULL) {
+                log_error("option '-replay' may appear only once\n");
+                lib_free(replay_load_filename);
+                free(argv_filtered);
+                return -1;
+            }
+            main_replay_file = argv[i + 1];
+            replay_load_filename = main_replay_extract_load(main_replay_file);
+            if (replay_load_filename == NULL) {
+                free(argv_filtered);
+                return -1;
+            }
+            ++i;
+            continue;
+        }
         argv_filtered[argc_filtered++] = argv[i];
+    }
+    if (replay_load_filename != NULL) {
+        argv_filtered[argc_filtered++] = "-load";
+        argv_filtered[argc_filtered++] = replay_load_filename;
     }
     argv_filtered[argc_filtered] = NULL;
     *argc_out = argc_filtered;

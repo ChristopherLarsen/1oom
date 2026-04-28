@@ -1,7 +1,14 @@
 #include "config.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+#ifdef _WIN32
+#include <direct.h>
+#endif
 
 #include "SDL.h"
 
@@ -365,6 +372,221 @@ static void video_setpal(const uint8_t *pal, int first, int num)
     }
     video.palette_to_set = true;
     video_update();
+}
+
+/* -------------------------------------------------------------------------- */
+
+static uint32_t png_crc32_update(uint32_t crc, const uint8_t *data, size_t len)
+{
+    crc = ~crc;
+    for (size_t i = 0; i < len; ++i) {
+        crc ^= data[i];
+        for (int bit = 0; bit < 8; ++bit) {
+            if (crc & 1) {
+                crc = (crc >> 1) ^ 0xedb88320U;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+    return ~crc;
+}
+
+static uint32_t png_adler32(const uint8_t *data, size_t len)
+{
+    uint32_t a = 1;
+    uint32_t b = 0;
+    for (size_t i = 0; i < len; ++i) {
+        a = (a + data[i]) % 65521U;
+        b = (b + a) % 65521U;
+    }
+    return (b << 16) | a;
+}
+
+static void png_put_be32(uint8_t *dst, uint32_t value)
+{
+    dst[0] = (uint8_t)(value >> 24);
+    dst[1] = (uint8_t)(value >> 16);
+    dst[2] = (uint8_t)(value >> 8);
+    dst[3] = (uint8_t)value;
+}
+
+static int png_write_be32(FILE *fd, uint32_t value)
+{
+    uint8_t buf[4];
+    png_put_be32(buf, value);
+    return (fwrite(buf, sizeof(buf), 1, fd) == 1) ? 0 : -1;
+}
+
+static int png_write_chunk(FILE *fd, const char type[4], const uint8_t *data, uint32_t len)
+{
+    uint32_t crc;
+    if (png_write_be32(fd, len) != 0) {
+        return -1;
+    }
+    if (fwrite(type, 4, 1, fd) != 1) {
+        return -1;
+    }
+    if ((len > 0) && (fwrite(data, len, 1, fd) != 1)) {
+        return -1;
+    }
+    crc = png_crc32_update(0, (const uint8_t *)type, 4);
+    crc = png_crc32_update(crc, data, len);
+    return png_write_be32(fd, crc);
+}
+
+static int replay_mkdir_one(const char *path)
+{
+#ifdef _WIN32
+    if (_mkdir(path) == 0) {
+#else
+    if (mkdir(path, 0777) == 0) {
+#endif
+        return 0;
+    }
+    return (errno == EEXIST) ? 0 : -1;
+}
+
+static void replay_mkdir_parent_dirs(const char *filename)
+{
+    char path[1024];
+    size_t len;
+    len = strlen(filename);
+    if (len >= sizeof(path)) {
+        return;
+    }
+    memcpy(path, filename, len + 1);
+    for (char *p = path + 1; *p != '\0'; ++p) {
+        if ((*p == '/') || (*p == '\\')) {
+            char old = *p;
+            *p = '\0';
+            replay_mkdir_one(path);
+            *p = old;
+        }
+    }
+}
+
+static uint8_t *png_make_rgb_rows(size_t *raw_len_out)
+{
+    const size_t row_len = (size_t)video.bufw * 3 + 1;
+    const size_t raw_len = row_len * (size_t)video.bufh;
+    uint8_t *raw = malloc(raw_len);
+    if (raw == NULL) {
+        return NULL;
+    }
+    for (int y = 0; y < video.bufh; ++y) {
+        uint8_t *dst = raw + (size_t)y * row_len;
+        const uint8_t *src = (const uint8_t *)video.screen->pixels + (size_t)y * video.screen->pitch;
+        *dst++ = 0;
+        for (int x = 0; x < video.bufw; ++x) {
+            SDL_Color c = video.color[src[x]];
+            *dst++ = c.r;
+            *dst++ = c.g;
+            *dst++ = c.b;
+        }
+    }
+    *raw_len_out = raw_len;
+    return raw;
+}
+
+static uint8_t *png_make_zlib_uncompressed(const uint8_t *raw, size_t raw_len, uint32_t *zlib_len_out)
+{
+    const size_t max_blocks = (raw_len + 65534U) / 65535U;
+    const size_t zlib_len = 2 + raw_len + max_blocks * 5 + 4;
+    uint8_t *zlib = malloc(zlib_len);
+    uint8_t *p = zlib;
+    size_t remaining = raw_len;
+    const uint8_t *src = raw;
+    if (zlib == NULL || zlib_len > UINT32_MAX) {
+        free(zlib);
+        return NULL;
+    }
+    *p++ = 0x78;
+    *p++ = 0x01;
+    while (remaining > 0) {
+        uint16_t block_len = (remaining > 65535U) ? 65535U : (uint16_t)remaining;
+        uint16_t nlen = (uint16_t)~block_len;
+        *p++ = (remaining <= 65535U) ? 1 : 0;
+        *p++ = (uint8_t)block_len;
+        *p++ = (uint8_t)(block_len >> 8);
+        *p++ = (uint8_t)nlen;
+        *p++ = (uint8_t)(nlen >> 8);
+        memcpy(p, src, block_len);
+        p += block_len;
+        src += block_len;
+        remaining -= block_len;
+    }
+    png_put_be32(p, png_adler32(raw, raw_len));
+    p += 4;
+    *zlib_len_out = (uint32_t)(p - zlib);
+    return zlib;
+}
+
+int hw_video_screenshot_png(const char *filename)
+{
+    static const uint8_t sig[8] = { 137, 80, 78, 71, 13, 10, 26, 10 };
+    FILE *fd = NULL;
+    uint8_t ihdr[13];
+    uint8_t *raw = NULL;
+    uint8_t *zlib = NULL;
+    size_t raw_len = 0;
+    uint32_t zlib_len = 0;
+    int res = -1;
+
+    if ((video.screen == NULL) || (video.bufw <= 0) || (video.bufh <= 0)) {
+        log_error("Replay: screenshot requested before video is ready\n");
+        return -1;
+    }
+
+    replay_mkdir_parent_dirs(filename);
+    fd = fopen(filename, "wb");
+    if (fd == NULL) {
+        log_error("Replay: could not open screenshot '%s'\n", filename);
+        goto done;
+    }
+    if (SDL_MUSTLOCK(video.screen) && SDL_LockSurface(video.screen) < 0) {
+        log_error("Replay: could not lock screenshot surface: %s\n", SDL_GetError());
+        goto done;
+    }
+    raw = png_make_rgb_rows(&raw_len);
+    if (SDL_MUSTLOCK(video.screen)) {
+        SDL_UnlockSurface(video.screen);
+    }
+    if (raw == NULL) {
+        log_error("Replay: could not allocate screenshot rows\n");
+        goto done;
+    }
+    zlib = png_make_zlib_uncompressed(raw, raw_len, &zlib_len);
+    if (zlib == NULL) {
+        log_error("Replay: could not allocate screenshot deflate stream\n");
+        goto done;
+    }
+
+    png_put_be32(&ihdr[0], (uint32_t)video.bufw);
+    png_put_be32(&ihdr[4], (uint32_t)video.bufh);
+    ihdr[8] = 8;
+    ihdr[9] = 2;
+    ihdr[10] = 0;
+    ihdr[11] = 0;
+    ihdr[12] = 0;
+
+    if (fwrite(sig, sizeof(sig), 1, fd) != 1
+      || png_write_chunk(fd, "IHDR", ihdr, sizeof(ihdr)) != 0
+      || png_write_chunk(fd, "IDAT", zlib, zlib_len) != 0
+      || png_write_chunk(fd, "IEND", NULL, 0) != 0
+    ) {
+        log_error("Replay: could not write screenshot '%s'\n", filename);
+        goto done;
+    }
+    res = 0;
+
+done:
+    free(zlib);
+    free(raw);
+    if (fd != NULL) {
+        fclose(fd);
+    }
+    return res;
 }
 
 /* -------------------------------------------------------------------------- */
