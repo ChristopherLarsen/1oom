@@ -32,6 +32,7 @@ libuicmdline_a_SOURCES = \
     uigame.c \
     uigmap.c \
     uiground.c \
+    uijumpscreen.c \
     uihelp.c \
     uihelp.h \
     uiinput.c \

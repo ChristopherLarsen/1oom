@@ -83,6 +83,8 @@ static void game_ai_classic_new_game_init(struct game_s *g, player_id_t player, 
     /* XXX these shipi values are wrong, but fixed by first next turn */
     e->shipi_colony = 1;
     e->shipi_bomber = 4;
+    /* DRG-RNG-TRACE-3 2026-04-29: per-player seed after new_game_init. Keys sorted alphabetically to match Godot TraceLog output. */
+    LOG_EVENT(0, "new_game_init", "n_nearby=%i p2cd=%i p3cd=%i pi=%i seed_out=%u", n, (int)e->ai_p2_countdown, (int)e->ai_p3_countdown, (int)player, (unsigned)g->seed);
 }
 
 static void game_ai_classic_new_game_tech(struct game_s *g)
@@ -107,6 +109,8 @@ static void game_ai_classic_new_game_tech(struct game_s *g)
                 e->tech.cost[field] = tech * tech * 50;
             }
         }
+        /* DRG-RNG-TRACE-3 2026-04-29: per-player seed after new_game_tech. */
+        LOG_EVENT(0, "new_game_tech", "pi=%i seed_out=%u", (int)pli, (unsigned)g->seed);
     }
 }
 
@@ -149,6 +153,12 @@ static int game_ai_best_speed(const struct game_s *g, player_id_t player_i)
     */
     return game_tech_player_best_tech(g, TECH_FIELD_PROPULSION, 0, 6, 50, player_i) + 3;
 }
+
+/* DRG-DISPATCH-TRACE 2026-04-29: forward decl so send_scout can call it. */
+static void game_turn_fleet_send_trace_emit(int year, int pi, int from, int dest,
+                                            const int *orbit_in, const int *dispatched,
+                                            int num_shiptypes, int speed,
+                                            int enroute_after, uint32_t seed_in, int early);
 
 static void game_ai_classic_turn_p1_send_scout(struct game_s *g, struct ai_turn_p1_s *ait, player_id_t pi)
 {
@@ -252,6 +262,14 @@ static void game_ai_classic_turn_p1_send_scout(struct game_s *g, struct ai_turn_
                     fleet_enroute_t *r;
                     const planet_t *p2 = &(g->planet[mini]);
                     shipcount_t num_send;
+                    /* DRG-DISPATCH-TRACE: snapshot orbit and seed BEFORE mutating. */
+                    int _scout_orbit_in[NUM_SHIPDESIGNS];
+                    int _scout_dispatched[NUM_SHIPDESIGNS];
+                    uint32_t _scout_seed_in = g->seed;
+                    for (int k = 0; k < NUM_SHIPDESIGNS; ++k) {
+                        _scout_orbit_in[k] = (k < e->shipdesigns_num) ? (int)t[k] : 0;
+                        _scout_dispatched[k] = 0;
+                    }
                     r = &(g->enroute[g->enroute_num++]);
                     num_send = t[shipi] / 4 + 1;
                     r->dest = pli;
@@ -268,6 +286,9 @@ static void game_ai_classic_turn_p1_send_scout(struct game_s *g, struct ai_turn_
                     BOOLVEC_SET1(r->visible, pi);
                     t[shipi] -= num_send;
                     tbl_ownorbit[mini] -= num_send;
+                    /* DRG-DISPATCH-TRACE: emit ai_dispatch event for scout dispatch. */
+                    _scout_dispatched[shipi] = (int)num_send;
+                    game_turn_fleet_send_trace_emit(g->year, (int)pi, (int)mini, (int)pli, _scout_orbit_in, _scout_dispatched, 1, (int)g->srd[pi].design[shipi].engine + 1, g->enroute_num, _scout_seed_in, -1);
                 }
             }
         }
@@ -467,6 +488,22 @@ static bool game_ai_classic_turn_p1_have_colony_ship(struct game_s *g, struct ai
     return true;
 }
 
+/* DRG-DISPATCH-TRACE 2026-04-29: emit one ai_dispatch event per
+ * game_turn_fleet_send call so we can diff the two engines and
+ * locate the first non-matching dispatch decision. */
+static void game_turn_fleet_send_trace_emit(int year, int pi, int from, int dest,
+                                            const int *orbit_in, const int *dispatched,
+                                            int num_shiptypes, int speed,
+                                            int enroute_after, uint32_t seed_in, int early)
+{
+    LOG_EVENT(year, "ai_dispatch",
+              "pi=%i from=%i dest=%i orbit_in=[%i,%i,%i,%i,%i,%i] ships=[%i,%i,%i,%i,%i,%i] num_shiptypes=%i speed=%i enroute_after=%i seed_in=%u early=%i",
+              pi, from, dest,
+              orbit_in[0], orbit_in[1], orbit_in[2], orbit_in[3], orbit_in[4], orbit_in[5],
+              dispatched[0], dispatched[1], dispatched[2], dispatched[3], dispatched[4], dispatched[5],
+              num_shiptypes, speed, enroute_after, (unsigned int)seed_in, early);
+}
+
 static void game_turn_fleet_send(struct game_s *g, struct ai_turn_p1_s *ait, player_id_t pi, uint8_t from, uint8_t dest)
 {
     empiretechorbit_t *e = &(g->eto[pi]);
@@ -474,12 +511,27 @@ static void game_turn_fleet_send(struct game_s *g, struct ai_turn_p1_s *ait, pla
     const planet_t *pf, *pt;
     fleet_orbit_t *o;
     uint8_t speed, num_shiptypes;
+    /* DRG-DISPATCH-TRACE: snapshot seed and orbit inventory before any work. */
+    uint32_t seed_in = g->seed;
+    int orbit_in[NUM_SHIPDESIGNS];
+    int dispatched[NUM_SHIPDESIGNS];
+    int sent_num_shiptypes = 0;
+    int sent_speed = 0;
+    int early = -1;
+    for (int i = 0; i < NUM_SHIPDESIGNS; ++i) {
+        orbit_in[i] = (i < e->shipdesigns_num) ? (int)e->orbit[from].ships[i] : 0;
+        dispatched[i] = 0;
+    }
     if (from == dest) {
+        early = 0;
+        game_turn_fleet_send_trace_emit(g->year, (int)pi, (int)from, (int)dest, orbit_in, dispatched, 0, 0, g->enroute_num, seed_in, early);
         return;
     }
     ait->tbl_force_own[from] = 0;
     if (g->enroute_num == FLEET_ENROUTE_MAX) {
         log_warning("fleet enroute table (size %i) full, could not leave orbit!\n", FLEET_ENROUTE_MAX);
+        early = 1;
+        game_turn_fleet_send_trace_emit(g->year, (int)pi, (int)from, (int)dest, orbit_in, dispatched, 0, 0, g->enroute_num, seed_in, early);
         return;
     }
     pf = &(g->planet[from]);
@@ -521,6 +573,12 @@ static void game_turn_fleet_send(struct game_s *g, struct ai_turn_p1_s *ait, pla
         r->y = pf->y;
         ++g->enroute_num;
     }
+    /* DRG-DISPATCH-TRACE: capture dispatched ships array. */
+    if (num_shiptypes > 0) {
+        for (int i = 0; i < NUM_SHIPDESIGNS; ++i) dispatched[i] = (int)r->ships[i];
+        sent_num_shiptypes = (int)num_shiptypes;
+        sent_speed = (int)speed + 1;
+    }
     {
         bool all_sent = true;
         if (g->ai_id == GAME_AI_CLASSICPLUS) {
@@ -539,6 +597,8 @@ static void game_turn_fleet_send(struct game_s *g, struct ai_turn_p1_s *ait, pla
             BOOLVEC_CLEAR(o->visible, NUM_SHIPDESIGNS);
         }
     }
+    /* DRG-DISPATCH-TRACE: emit ai_dispatch event after work completes. */
+    game_turn_fleet_send_trace_emit(g->year, (int)pi, (int)from, (int)dest, orbit_in, dispatched, sent_num_shiptypes, sent_speed, g->enroute_num, seed_in, early);
 }
 
 static void game_ai_classic_turn_p1_send_colony_ships(struct game_s *g, struct ai_turn_p1_s *ait, player_id_t pi)
@@ -1590,10 +1650,14 @@ again:
     ait->shiplook = game_ai_classic_design_ship_get_look(g, pi, ait->hull);
     sd->wpnn[0] = 0;
     for (int loops2 = 0; (sd->wpnn[0] == 0) && (loops2 < 100000); ++loops2) {
+        LOG_EVENT(g->year, "design_seed", "hull=%i loops=%i loops2=%i pi=%i seed=%u shiptype=%i site=pre_prepare", (int)ait->hull, loops, loops2, (int)pi, (unsigned)g->seed, (int)ait->shiptype);
         game_design_prepare_ai(g, &ait->gd, pi, ait->hull, ait->shiplook);
+        LOG_EVENT(g->year, "design_seed", "hull=%i loops=%i loops2=%i pi=%i seed=%u shiptype=%i site=post_prepare", (int)ait->hull, loops, loops2, (int)pi, (unsigned)g->seed, (int)ait->shiptype);
         game_ai_classic_design_ship_base(g, ait, pi);
+        LOG_EVENT(g->year, "design_seed", "hull=%i loops=%i loops2=%i pi=%i seed=%u shiptype=%i site=post_base", (int)ait->hull, loops, loops2, (int)pi, (unsigned)g->seed, (int)ait->shiptype);
         game_ai_classic_design_ship_sub2(g, ait, pi);
         game_ai_classic_design_ship_weapons(g, ait, pi);
+        LOG_EVENT(g->year, "design_seed", "hull=%i loops=%i loops2=%i pi=%i seed=%u shiptype=%i site=post_weapons", (int)ait->hull, loops, loops2, (int)pi, (unsigned)g->seed, (int)ait->shiptype);
         game_design_set_hp(sd);
         game_design_compact_slots(sd);
         if (ait->shiptype == 0/*colony*/) {
@@ -1654,6 +1718,9 @@ static void game_ai_classic_turn_p2_do(struct game_s *g, player_id_t pi)
     shipresearch_t *srd = &(g->srd[pi]);
     shipdesign_t *sd = &(srd->design[0]);
     int num_non0 = 0;
+    /* DRG-DISPATCH-TRACE-2 2026-04-29: emit turn_p2_do entry so we can
+     * verify countdown timing matches between engines. */
+    LOG_EVENT(g->year, "turn_p2_do", "pi=%i countdown_post_dec=%i sd_num=%i", (int)pi, (int)e->ai_p2_countdown, (int)e->shipdesigns_num);
     ait->have_pulsar = false;
     ait->have_repulwarp = false;
     for (player_id_t p2 = PLAYER_0; p2 < g->players; ++p2) {
@@ -1679,6 +1746,7 @@ static void game_ai_classic_turn_p2_do(struct game_s *g, player_id_t pi)
         }
     }
     e->ai_p2_countdown = rnd_1_n(12, &g->seed) + 8;
+    LOG_EVENT(g->year, "p2_seed", "pi=%i seed=%u site=post_countdown", (int)pi, (unsigned)g->seed);
     game_update_maint_costs(g);
     e->shipi_colony = -1;
     e->shipi_bomber = -1;
@@ -1739,6 +1807,7 @@ static void game_ai_classic_turn_p2_do(struct game_s *g, player_id_t pi)
     }
     for (int loops = 0; (e->shipdesigns_num < NUM_SHIPDESIGNS) && (loops < 10000); ++loops) {
         int si;
+        uint32_t seed_before_design;
         si = e->shipdesigns_num;
         if (e->shipi_colony == -1) {
             e->shipi_colony = si;
@@ -1749,7 +1818,9 @@ static void game_ai_classic_turn_p2_do(struct game_s *g, player_id_t pi)
         } else {
             ait->shiptype = 1/*fighter*/;
         }
+        seed_before_design = (uint32_t)g->seed;
         game_ai_classic_design_ship(g, ait, pi);
+        LOG_EVENT(g->year, "p2_seed", "loop=%i pi=%i seed_in=%u seed_out=%u shiptype=%i site=post_design_ship", loops, (int)pi, (unsigned)seed_before_design, (unsigned)g->seed, (int)ait->shiptype);
     }
     if (e->shipdesigns_num < NUM_SHIPDESIGNS) {
         log_fatal_and_die("BUG: %s hang\n", __func__);
@@ -1792,6 +1863,7 @@ static void game_ai_classic_turn_p2_do(struct game_s *g, player_id_t pi)
                 }
             }
         }
+        LOG_EVENT(g->year, "p2_seed", "pi=%i seed=%u site=pre_buildship", (int)pi, (unsigned)g->seed);
         for (int i = 0; i < g->galaxy_stars; ++i) {
             planet_t *p = &(g->planet[i]);
             if (p->owner == pi) {
@@ -1804,6 +1876,7 @@ static void game_ai_classic_turn_p2_do(struct game_s *g, player_id_t pi)
                 p->buildship = n;
             }
         }
+        LOG_EVENT(g->year, "p2_seed", "pi=%i seed=%u site=post_buildship", (int)pi, (unsigned)g->seed);
     }
 }
 
@@ -1831,7 +1904,11 @@ static void game_ai_classic_turn_p3_sub1(struct game_s *g, player_id_t pi)
             if (e->treaty[pi2] >= TREATY_WAR) {
                 e->spymode_next[pi2] = SPYMODE_SABOTAGE;
             } else if (e->spymode_next[pi2] == SPYMODE_HIDE) { /* FIXME BUG always true */
+                if (e->race != RACE_DARLOK) {
+                    LOG_EVENT(g->year, "p3_seed", "pi=%i pi2=%i seed=%u site=turn_p3_sub1_pre_darlok", (int)pi, (int)pi2, (unsigned)g->seed);
+                }
                 if ((e->race == RACE_DARLOK) || rnd_0_nm1(2, &g->seed)) {
+                    LOG_EVENT(g->year, "p3_seed", "pi=%i pi2=%i seed=%u site=turn_p3_sub1_pre_espionage", (int)pi, (int)pi2, (unsigned)g->seed);
                     if (rnd_1_n(200, &g->seed) > (e->relation1[pi2] * 2 + 200)) {
                         e->spymode_next[pi2] = SPYMODE_ESPIONAGE;
                     }
@@ -1839,6 +1916,7 @@ static void game_ai_classic_turn_p3_sub1(struct game_s *g, player_id_t pi)
                     e->spymode_next[pi2] = SPYMODE_HIDE; /* FIXME redundant */
                 }
             } else {
+                LOG_EVENT(g->year, "p3_seed", "pi=%i pi2=%i seed=%u site=turn_p3_sub1_pre_sabotage", (int)pi, (int)pi2, (unsigned)g->seed);
                 if (rnd_1_n(100, &g->seed) > (e->relation1[pi2] + 100)) {
                     e->spymode_next[pi2] = SPYMODE_SABOTAGE;
                 }
@@ -1880,6 +1958,7 @@ static void game_ai_classic_turn_p3(struct game_s *g)
         }
         if (--e->ai_p3_countdown <= 0) {
             int w_ship, w_def, w_ind, w_eco;
+            LOG_EVENT(g->year, "p3_seed", "pi=%i seed=%u site=turn_p3_pre_countdown_reset", (int)pi, (unsigned)g->seed);
             e->ai_p3_countdown = rnd_1_n(5, &g->seed) + 1;
             game_update_eco_on_waste(g, pi, true);
             w_ship = ai_p3_tbl_w[ti][0];
@@ -1936,7 +2015,9 @@ static void game_ai_classic_turn_p3(struct game_s *g)
                     left = 100 - sl[PLANET_SLIDER_SHIP] - sl[PLANET_SLIDER_DEF] - sl[PLANET_SLIDER_IND] - sl[PLANET_SLIDER_ECO] - sl[PLANET_SLIDER_TECH];
                     while (left > 0) {
                         int r1, r2;
+                        LOG_EVENT(g->year, "p3_seed", "pi=%i planet=%i seed=%u left=%i site=turn_p3_planet_slider_r1", (int)pi, i, (unsigned)g->seed, left);
                         r1 = rnd_1_n(13, &g->seed);
+                        LOG_EVENT(g->year, "p3_seed", "pi=%i planet=%i seed=%u left=%i site=turn_p3_planet_slider_r2", (int)pi, i, (unsigned)g->seed, left);
                         r2 = rnd_1_n(8, &g->seed) + 2;
                         SETMIN(r2, left);
                         left -= r2;
@@ -1992,16 +2073,19 @@ static void game_ai_classic_turn_p3(struct game_s *g)
             sl[TECH_FIELD_PLANETOLOGY] = 5;
             sl[TECH_FIELD_PROPULSION] = 5;
             sl[TECH_FIELD_WEAPON] = 5;
+            LOG_EVENT(g->year, "p3_seed", "pi=%i seed=%u site=turn_p3_pre_year30_prop_gate", (int)pi, (unsigned)g->seed);
             if ((g->year < 30) && rnd_0_nm1(2, &g->seed)) {
                 sl[TECH_FIELD_PROPULSION] = 75;
             } else {
                 bool flag_focus_own;
+                LOG_EVENT(g->year, "p3_seed", "pi=%i seed=%u site=turn_p3_pre_focus_own", (int)pi, (unsigned)g->seed);
                 flag_focus_own = !rnd_0_nm1(4, &g->seed);
                 if (((race == RACE_BULRATHI) || (race == RACE_MRRSHAN)) && flag_focus_own) {
                     sl[TECH_FIELD_WEAPON] = 75;
                 } else if ((race == RACE_DARLOK) && flag_focus_own) {
                     sl[TECH_FIELD_COMPUTER] = 75;
                 } else if ((race == RACE_MEKLAR) && flag_focus_own) {
+                    LOG_EVENT(g->year, "p3_seed", "pi=%i seed=%u site=turn_p3_pre_meklar_subpick", (int)pi, (unsigned)g->seed);
                     sl[rnd_0_nm1(2, &g->seed) ? TECH_FIELD_CONSTRUCTION : TECH_FIELD_PLANETOLOGY] = 75;
                 } else if ((race == RACE_ALKARI) && flag_focus_own) {
                     sl[TECH_FIELD_PROPULSION] = 75;
@@ -2009,6 +2093,7 @@ static void game_ai_classic_turn_p3(struct game_s *g)
                     sl[TECH_FIELD_PLANETOLOGY] = 75;
                 } else {
                     int r1, w_comp, w_cons, w_ff, w_plan, w_prop;
+                    LOG_EVENT(g->year, "p3_seed", "pi=%i seed=%u site=turn_p3_pre_tech_weighted", (int)pi, (unsigned)g->seed);
                     r1 = rnd_1_n(16, &g->seed);
                     w_comp = ai_p3_tbl_w[ti][4];
                     w_cons = w_comp + ai_p3_tbl_w[ti][5];
@@ -2043,6 +2128,7 @@ static void game_ai_classic_turn_p3(struct game_s *g)
             if (totalspies == 0) {
                 sec = 0;
             } else {
+                LOG_EVENT(g->year, "p3_seed", "pi=%i seed=%u site=turn_p3_pre_security_calc", (int)pi, (unsigned)g->seed);
                 sec = rnd_0_nm1(2, &g->seed) * totalspies;
             }
             sec += g->difficulty * 8;
@@ -2054,10 +2140,17 @@ static void game_ai_classic_turn_p3(struct game_s *g)
                 e->spymode[pi2] = SPYMODE_HIDE;
                 if (1
                   && (pi != pi2) && BOOLVEC_IS1(e->contact, pi2) && (e->spymode_next[pi2] != SPYMODE_HIDE)
-                  && (BOOLVEC_IS0(g->is_ai, pi2) || !rnd_0_nm1(3, &g->seed))
                 ) {
-                    e->spymode[pi2] = e->spymode_next[pi2];
-                    e->spying[pi2] = rnd_1_n(5, &g->seed) + 5;
+                    /* Trace the human-skip gate seed before consuming the rnd_0_nm1(3) draw (only
+                       fires when pi2 is AI; human pi2 short-circuits and consumes no RNG). */
+                    if (BOOLVEC_IS1(g->is_ai, pi2)) {
+                        LOG_EVENT(g->year, "p3_seed", "pi=%i pi2=%i seed=%u site=turn_p3_pre_spy_human_skip", (int)pi, (int)pi2, (unsigned)g->seed);
+                    }
+                    if (BOOLVEC_IS0(g->is_ai, pi2) || !rnd_0_nm1(3, &g->seed)) {
+                        e->spymode[pi2] = e->spymode_next[pi2];
+                        LOG_EVENT(g->year, "p3_seed", "pi=%i pi2=%i seed=%u site=turn_p3_pre_spying_count", (int)pi, (int)pi2, (unsigned)g->seed);
+                        e->spying[pi2] = rnd_1_n(5, &g->seed) + 5;
+                    }
                 }
             }
         }

@@ -691,6 +691,18 @@ static int video_sw_set(int w, int h)
     if (hw_opt_borderless) {
         window_flags |= SDL_WINDOW_BORDERLESS;
     }
+    /* DRG agent-orion patch: MOO_HIDDEN_WINDOW=1 creates the window with
+       SDL_WINDOW_HIDDEN so it never appears (no focus steal, no Dock flash).
+       Rendering still happens to the framebuffer, so the autoshot patch
+       captures normally. Designed for capture_all.sh runs while the user
+       is doing other work. */
+    {
+        const char *hidden = getenv("MOO_HIDDEN_WINDOW");
+        if (hidden && hidden[0] && hidden[0] != '0') {
+            window_flags |= SDL_WINDOW_HIDDEN;
+            log_message("HiddenWindow: SDL_WINDOW_HIDDEN set (no visible window)\n");
+        }
+    }
     if (hw_opt_fullscreen) {
         if (hw_opt_screen_fsw && hw_opt_screen_fsh) {
             w = hw_opt_screen_fsw;

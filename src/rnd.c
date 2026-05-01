@@ -6,11 +6,14 @@
 
 /* -------------------------------------------------------------------------- */
 
+static unsigned int rnd_call_count = 0;
+
 /* -------------------------------------------------------------------------- */
 
 uint16_t rnd_0_nm1(uint16_t n, uint32_t *seed)
 {   /* NOTE: This code is simplified and contains hacks.
        Assembler code in this function would be more appropriate. */
+    ++rnd_call_count;
     uint16_t r = 0;
     uint32_t di_si = *seed;
 
@@ -92,4 +95,14 @@ uint16_t rnd_bitfiddle(uint16_t ax)
         ax = dx;
     } while (--loops);
     return ax;
+}
+
+unsigned int rnd_get_call_count(void)
+{
+    return rnd_call_count;
+}
+
+void rnd_reset_call_count(void)
+{
+    rnd_call_count = 0;
 }

@@ -1,0 +1,18 @@
+diff --git a/src/game/game_new.c b/src/game/game_new.c
+--- a/src/game/game_new.c
++++ b/src/game/game_new.c
+@@ -1135,6 +1135,7 @@ int game_new(struct game_s *g, struct game_aux_s *gaux, struct game_new_options_
+     game_generate_home_etc(g, opt);
+     game_generate_relation_etc(g);
+     game_generate_research(g, researchflag);
++    log_message("[RND-TRACE-INIT] post-research seed=%u\n", g->seed);
+     game_generate_misc(g);
+     for (player_id_t i = PLAYER_0; i < g->players; ++i) {
+         char *b;
+@@ -1156,6 +1157,7 @@ int game_new(struct game_s *g, struct game_aux_s *gaux, struct game_new_options_
+         lbxfile_item_release(LBXFILE_NAMES, namedata);
+     }
++    log_message("[RND-TRACE-INIT] post-emperor-names seed=%u\n", g->seed);
+     g->active_player = PLAYER_0;
+     return 0;
+ }

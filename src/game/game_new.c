@@ -1117,6 +1117,23 @@ int game_new(struct game_s *g, struct game_aux_s *gaux, struct game_new_options_
         }
     }
     researchflag[TECH_FIELD_WEAPON * 50 + (TECH_WEAP_DEATH_RAY - 1)] = 0;
+    /* DRG-RNG-TRACE-3 2026-04-29: dump rflag availability bits per field.
+     * Each field emits 50 bits as a 13-hex-char string (50 bits -> ceil(50/4)=13 nybbles).
+     * Allows comparison with Godot TechTable.is_unused() to test the D4 hypothesis. */
+    {
+        for (int _f = 0; _f < 6; ++_f) {
+            char _hex[14] = {0};
+            unsigned long long _bits = 0;
+            for (int _t = 49; _t >= 0; --_t) {
+                _bits = (_bits << 1) | (researchflag[_f * 50 + _t] ? 1 : 0);
+            }
+            for (int _h = 12; _h >= 0; --_h) {
+                _hex[_h] = "0123456789abcdef"[_bits & 0xf];
+                _bits >>= 4;
+            }
+            LOG_EVENT(0, "rflag_field", "bits=%s field=%i", _hex, _f);
+        }
+    }
     {
         uint32_t vo, vr = 0, vb = 0, m = 1, va = 0;
         vo = g->difficulty + g->galaxy_size * 10 + g->players * 100;
@@ -1133,8 +1150,14 @@ int game_new(struct game_s *g, struct game_aux_s *gaux, struct game_new_options_
         log_message("Game: new game -new %u:0x%x:%u:0x%x:%u -nga %u\n", vo, vr, vb, g->galaxy_seed, va, g->ai_id);
     }
     game_generate_home_etc(g, opt);
+    /* DRG-RNG-TRACE-3: seed after home+AI-init (new_game_init consumes RNG here). */
+    LOG_EVENT(0, "seed_checkpoint", "phase=post_home_etc seed=%u", (unsigned)g->seed);
     game_generate_relation_etc(g);
+    /* DRG-RNG-TRACE-3: seed after relation_etc (no RNG; checkpoint for alignment). */
+    LOG_EVENT(0, "seed_checkpoint", "phase=post_relation_etc seed=%u", (unsigned)g->seed);
     game_generate_research(g, researchflag);
+    /* DRG-RNG-TRACE-3: seed after research generation (heavy RNG consumer). */
+    LOG_EVENT(0, "seed_checkpoint", "phase=post_research seed=%u", (unsigned)g->seed);
     game_generate_misc(g);
     if (!game_num_update_on_load) {
         game_generate_load(g);
@@ -1158,6 +1181,8 @@ int game_new(struct game_s *g, struct game_aux_s *gaux, struct game_new_options_
         game_generate_emperor_names(g, namedata);
         lbxfile_item_release(LBXFILE_NAMES, namedata);
     }
+    /* DRG-RNG-TRACE-3: seed after emperor names (RNG consumed per non-AI player). */
+    LOG_EVENT(0, "seed_checkpoint", "phase=post_emperor_names seed=%u", (unsigned)g->seed);
     g->active_player = PLAYER_0;
     return 0;
 }

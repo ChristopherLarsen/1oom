@@ -56,7 +56,7 @@ bool game_opt_message_filter[FINISHED_NUM] = { false, false, false, false, false
 
 static struct game_s game;
 static struct game_aux_s game_aux;
-static const int game_ai_gate_turns[] = { 1, 5, 20, 50, 100 };
+static const int game_ai_gate_turns[] = { 1, 5, 6, 7, 8, 9, 10, 12, 15, 16, 17, 18, 20, 50, 100 };
 static const int game_ai_gate_turns_num = sizeof(game_ai_gate_turns) / sizeof(game_ai_gate_turns[0]);
 
 
@@ -113,6 +113,18 @@ static void game_ai_gate_write_ship_array(FILE *f, const shipcount_t ships[NUM_S
             fputc(',', f);
         }
         fprintf(f, "%u", ships[i]);
+    }
+    fputc(']', f);
+}
+
+static void game_ai_gate_write_contact_array(FILE *f, const uint8_t *contact, int players)
+{
+    fputc('[', f);
+    for (int i = 0; i < players; ++i) {
+        if (i != 0) {
+            fputc(',', f);
+        }
+        fprintf(f, "%d", BOOLVEC_IS1(contact, i) ? 1 : 0);
     }
     fputc(']', f);
 }
@@ -282,7 +294,12 @@ static void game_ai_gate_write_fleets(FILE *f, const struct game_s *g)
             r->y,
             r->dest,
             r->speed,
-            game_calc_eta_trans(g, r->speed, r->x, r->y, g->planet[r->dest].x, g->planet[r->dest].y)
+            /* INSTRUMENTATION FIX: enroute[] holds SHIP fleets (transports have their own
+             * loop below at g->transport[]). Original code called game_calc_eta_trans here
+             * which uses the transport nebula-stepping algorithm — wrong for ship fleets.
+             * Causes false-positive eta_turns divergences vs Godot port whose state-dump
+             * stores the ship-formula result. Swapped to game_calc_eta_ship to match. */
+            game_calc_eta_ship(g, r->speed, r->x, r->y, g->planet[r->dest].x, g->planet[r->dest].y)
         );
     }
     fputs("],\"orbit\":[", f);
@@ -324,18 +341,59 @@ static void game_ai_gate_write_fleets(FILE *f, const struct game_s *g)
     fputs("]}", f);
 }
 
+static void game_ai_gate_write_diplo(FILE *f, const struct game_s *g)
+{
+    fputs("\"diplo\":[", f);
+    for (player_id_t pi = PLAYER_0; pi < g->players; ++pi) {
+        int relation1[PLAYER_NUM];
+        int relation_2[PLAYER_NUM];
+        int diplo_val[PLAYER_NUM];
+        int treaty_active[PLAYER_NUM];
+        const empiretechorbit_t *e = &(g->eto[pi]);
+        if (pi != PLAYER_0) {
+            fputc(',', f);
+        }
+        for (int other = 0; other < g->players; ++other) {
+            relation1[other] = e->relation1[other];
+            relation_2[other] = e->relation2[other];
+            diplo_val[other] = e->diplo_val[other];
+            treaty_active[other] = (e->treaty[other] != TREATY_NONE) ? 1 : 0;
+        }
+        fprintf(f, "{\"player\":%d,", pi);
+        fputs("\"relation1\":", f);
+        game_ai_gate_write_int_array(f, relation1, g->players);
+        fputs(",\"relation_2\":", f);
+        game_ai_gate_write_int_array(f, relation_2, g->players);
+        fputs(",\"diplo_val\":", f);
+        game_ai_gate_write_int_array(f, diplo_val, g->players);
+        fputs(",\"treaty_active\":", f);
+        game_ai_gate_write_int_array(f, treaty_active, g->players);
+        fputs(",\"contact\":", f);
+        game_ai_gate_write_contact_array(f, e->contact, g->players);
+        fputc('}', f);
+    }
+    fputc(']', f);
+}
+
 static void game_ai_gate_write_checkpoint(FILE *f, const struct game_s *g, int turn)
 {
     fprintf(
         f,
-        "{\"turn\":%d,\"year\":%u,\"rng_seed\":%u,\"end\":%d,\"winner\":%d,",
+        "{\"turn\":%d,\"year\":%u,\"rng_seed\":%u,\"rng_call_count\":%u,\"end\":%d,\"winner\":%d,",
         turn,
         g->year + YEAR_BASE,
         g->seed,
+        rnd_get_call_count(),
         g->end,
-        g->winner
+        /* INSTRUMENTATION FIX: emit -1 sentinel while game in progress to match Godot's
+         * convention. 1oom's g->winner is meaningless until g->end != 0 (production code
+         * uses g->end as the "game over" flag). Mirrors the eta-dump fix at game.c:297.
+         * Production gameplay untouched. */
+        ((g->end == 0) ? -1 : g->winner)
     );
     game_ai_gate_write_empires(f, g);
+    fputc(',', f);
+    game_ai_gate_write_diplo(f, g);
     fputc(',', f);
     game_ai_gate_write_planets(f, g);
     fputc(',', f);
@@ -354,15 +412,41 @@ static int game_run_ai_gate(struct game_s *g, const char *path)
         return -1;
     }
 
+    /* DRG-FIXTURE-PATCH 2026-04-28: snapshot the original is_ai bitmask
+     * BEFORE forcing all players AI, so the optional -yearsave path below
+     * can write saves that reflect the user's intended human/AI layout
+     * (e.g. slot 0 = human) rather than the all-AI runtime mode ai-gate
+     * uses internally. Without this, saves load as all-AI games and break
+     * the screenshot-diff harness which renders from slot 0's POV. */
+    BOOLVEC_DECLARE(orig_is_ai, PLAYER_NUM);
+    BOOLVEC_COPY(orig_is_ai, g->is_ai, PLAYER_NUM);
+
     for (player_id_t i = PLAYER_0; i < g->players; ++i) {
         BOOLVEC_SET1(g->is_ai, i);
     }
 
     game_ai_gate_active = true;
+    rnd_reset_call_count();
     fputc('{', f);
     game_ai_gate_write_meta(f, g);
     fputs(",\"checkpoints\":[", f);
     for (int turn = 1; turn <= 100; ++turn) {
+        /* DRG-FIXTURE-PATCH 2026-04-28: write a yearsave at start-of-turn
+         * when -yearsave is enabled, mirroring the UI loop's hook at
+         * game.c:1202 which fires inside UI_TURN_ACT_NEXT_TURN BEFORE
+         * game_turn_process. Save with the ORIGINAL is_ai bitmask so the
+         * resulting save captures the user's human/AI layout, then
+         * restore the all-AI mask so game_turn_process keeps running
+         * deterministically without any UI prompt. */
+        if (game_opt_year_save_enabled) {
+            BOOLVEC_DECLARE(saved_is_ai, PLAYER_NUM);
+            BOOLVEC_COPY(saved_is_ai, g->is_ai, PLAYER_NUM);
+            BOOLVEC_COPY(g->is_ai, orig_is_ai, PLAYER_NUM);
+            if (game_save_do_save_year(NULL, g)) {
+                log_error("Game: ai-gate could not create year save\n");
+            }
+            BOOLVEC_COPY(g->is_ai, saved_is_ai, PLAYER_NUM);
+        }
         game_end = game_turn_process(g);
         g->active_player = PLAYER_0;
         if (game_ai_gate_is_checkpoint_turn(turn)) {
@@ -1068,6 +1152,20 @@ int main_do(void)
         main_menu_action_t main_menu_action;
         int load_game_i = 0;
 
+        if (main_jumpscreen_spec != NULL
+          && ((strcmp(main_jumpscreen_spec, "newgame") == 0)
+            || (strncmp(main_jumpscreen_spec, "newgame:", 8) == 0))
+        ) {
+            extern int hw_auto_shot_armed; /* hwsdl2.c */
+            extern int hw_auto_shot_fired; /* hwsdl2.c */
+            int jrc = ui_jumpscreen_dispatch(&game, main_jumpscreen_spec);
+            if (jrc == 0 && hw_auto_shot_armed && !hw_auto_shot_fired) {
+                log_error("Jumpscreen: '%s' returned without rendering long enough for autoshot to fire (no PNG written)\n", main_jumpscreen_spec);
+                jrc = 3;
+            }
+            return (jrc == 0) ? 0 : 1;
+        }
+
         if (game_opt_new_game) {
             game_opt_new_game = false;
             game_new_opts = game_opt_new;
@@ -1169,6 +1267,24 @@ int main_do(void)
             return (ret == 0) ? 0 : 1;
         }
         ui_game_start(&game);
+        /* DRG agent-orion patch: -jumpscreen NAME[:ARGS] dispatches to a UI
+           screen function and exits, bypassing the normal turn loop. */
+        if (main_jumpscreen_spec != NULL) {
+            extern int hw_auto_shot_armed; /* hwsdl2.c */
+            extern int hw_auto_shot_fired; /* hwsdl2.c */
+            int jrc = ui_jumpscreen_dispatch(&game, main_jumpscreen_spec);
+            /* Silent-success detection: if MOO_AUTOSHOT was armed but the
+               screen function returned before the countdown fired, the
+               screen exited too quickly (e.g. ui_newtech with no pending
+               tech). Fail loudly instead of "succeeding" with no PNG. */
+            if (jrc == 0 && hw_auto_shot_armed && !hw_auto_shot_fired) {
+                log_error("Jumpscreen: '%s' returned without rendering long enough for autoshot to fire (no PNG written)\n", main_jumpscreen_spec);
+                jrc = 3;
+            }
+            ui_game_end(&game);
+            game_stop(&game);
+            return (jrc == 0) ? 0 : 1;
+        }
         game_end.type = GAME_END_NONE;
         while ((game_end.type == GAME_END_NONE) || (game_end.type == GAME_END_FINAL_WAR)) {
             for (; ((game_end.type == GAME_END_NONE) || (game_end.type == GAME_END_FINAL_WAR)) && (game.active_player < game.players); ++game.active_player) {

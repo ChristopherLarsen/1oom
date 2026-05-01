@@ -3,4 +3,4 @@ AM_CPPFLAGS = \
 
 noinst_LIBRARIES = libuinop.a
 
-libuinop_a_SOURCES = uinop.c
+libuinop_a_SOURCES = uinop.c uijumpscreen.c

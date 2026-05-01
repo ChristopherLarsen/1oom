@@ -23,6 +23,11 @@ const char *main_replay_file = NULL;
 const char *main_autoshot_dir = NULL;
 const char *main_shotkey_name = "F12";
 int main_replay_current_year = -1;
+/* DRG agent-orion patch: -jumpscreen NAME[:ARGS] for autonomous screen capture. */
+const char *main_jumpscreen_spec = NULL;
+/* Set by the HW backend's autoshot path; read by game.c silent-success check. */
+int hw_auto_shot_armed = 0;
+int hw_auto_shot_fired = 0;
 
 /* -------------------------------------------------------------------------- */
 
@@ -209,6 +214,19 @@ static int main_filter_trace_args(int argc, char **argv, int *argc_out, char ***
                 return -1;
             }
             main_shotkey_name = argv[i + 1];
+            ++i;
+            continue;
+        }
+        /* DRG agent-orion patch: -jumpscreen NAME[:ARGS] dispatches directly
+           to a UI screen function after game load, then exits. Combine with
+           MOO_AUTOSHOT_FRAMES + MOO_AUTOSHOT_PATH for autonomous capture. */
+        if (strcmp(argv[i], "-jumpscreen") == 0) {
+            if ((i + 1) >= argc) {
+                log_error("option '-jumpscreen' is missing the parameter\n");
+                free(argv_filtered);
+                return -1;
+            }
+            main_jumpscreen_spec = argv[i + 1];
             ++i;
             continue;
         }

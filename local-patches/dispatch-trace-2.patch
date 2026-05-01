@@ -1,0 +1,147 @@
+diff --git a/src/game/game_ai_classic.c b/src/game/game_ai_classic.c
+index b94bbde9..e5dd804b 100644
+--- a/src/game/game_ai_classic.c
++++ b/src/game/game_ai_classic.c
+@@ -150,6 +150,12 @@ static int game_ai_best_speed(const struct game_s *g, player_id_t player_i)
+     return game_tech_player_best_tech(g, TECH_FIELD_PROPULSION, 0, 6, 50, player_i) + 3;
+ }
+ 
++/* DRG-DISPATCH-TRACE 2026-04-29: forward decl so send_scout can call it. */
++static void game_turn_fleet_send_trace_emit(int year, int pi, int from, int dest,
++                                            const int *orbit_in, const int *dispatched,
++                                            int num_shiptypes, int speed,
++                                            int enroute_after, uint32_t seed_in, int early);
++
+ static void game_ai_classic_turn_p1_send_scout(struct game_s *g, struct ai_turn_p1_s *ait, player_id_t pi)
+ {
+     empiretechorbit_t *e = &(g->eto[pi]);
+@@ -252,6 +258,14 @@ static void game_ai_classic_turn_p1_send_scout(struct game_s *g, struct ai_turn_
+                     fleet_enroute_t *r;
+                     const planet_t *p2 = &(g->planet[mini]);
+                     shipcount_t num_send;
++                    /* DRG-DISPATCH-TRACE: snapshot orbit and seed BEFORE mutating. */
++                    int _scout_orbit_in[NUM_SHIPDESIGNS];
++                    int _scout_dispatched[NUM_SHIPDESIGNS];
++                    uint32_t _scout_seed_in = g->seed;
++                    for (int k = 0; k < NUM_SHIPDESIGNS; ++k) {
++                        _scout_orbit_in[k] = (k < e->shipdesigns_num) ? (int)t[k] : 0;
++                        _scout_dispatched[k] = 0;
++                    }
+                     r = &(g->enroute[g->enroute_num++]);
+                     num_send = t[shipi] / 4 + 1;
+                     r->dest = pli;
+@@ -268,6 +282,9 @@ static void game_ai_classic_turn_p1_send_scout(struct game_s *g, struct ai_turn_
+                     BOOLVEC_SET1(r->visible, pi);
+                     t[shipi] -= num_send;
+                     tbl_ownorbit[mini] -= num_send;
++                    /* DRG-DISPATCH-TRACE: emit ai_dispatch event for scout dispatch. */
++                    _scout_dispatched[shipi] = (int)num_send;
++                    game_turn_fleet_send_trace_emit(g->year, (int)pi, (int)mini, (int)pli, _scout_orbit_in, _scout_dispatched, 1, (int)g->srd[pi].design[shipi].engine + 1, g->enroute_num, _scout_seed_in, -1);
+                 }
+             }
+         }
+@@ -467,6 +484,22 @@ static bool game_ai_classic_turn_p1_have_colony_ship(struct game_s *g, struct ai
+     return true;
+ }
+ 
++/* DRG-DISPATCH-TRACE 2026-04-29: emit one ai_dispatch event per
++ * game_turn_fleet_send call so we can diff the two engines and
++ * locate the first non-matching dispatch decision. */
++static void game_turn_fleet_send_trace_emit(int year, int pi, int from, int dest,
++                                            const int *orbit_in, const int *dispatched,
++                                            int num_shiptypes, int speed,
++                                            int enroute_after, uint32_t seed_in, int early)
++{
++    LOG_EVENT(year, "ai_dispatch",
++              "pi=%i from=%i dest=%i orbit_in=[%i,%i,%i,%i,%i,%i] ships=[%i,%i,%i,%i,%i,%i] num_shiptypes=%i speed=%i enroute_after=%i seed_in=%u early=%i",
++              pi, from, dest,
++              orbit_in[0], orbit_in[1], orbit_in[2], orbit_in[3], orbit_in[4], orbit_in[5],
++              dispatched[0], dispatched[1], dispatched[2], dispatched[3], dispatched[4], dispatched[5],
++              num_shiptypes, speed, enroute_after, (unsigned int)seed_in, early);
++}
++
+ static void game_turn_fleet_send(struct game_s *g, struct ai_turn_p1_s *ait, player_id_t pi, uint8_t from, uint8_t dest)
+ {
+     empiretechorbit_t *e = &(g->eto[pi]);
+@@ -474,12 +507,27 @@ static void game_turn_fleet_send(struct game_s *g, struct ai_turn_p1_s *ait, pla
+     const planet_t *pf, *pt;
+     fleet_orbit_t *o;
+     uint8_t speed, num_shiptypes;
++    /* DRG-DISPATCH-TRACE: snapshot seed and orbit inventory before any work. */
++    uint32_t seed_in = g->seed;
++    int orbit_in[NUM_SHIPDESIGNS];
++    int dispatched[NUM_SHIPDESIGNS];
++    int sent_num_shiptypes = 0;
++    int sent_speed = 0;
++    int early = -1;
++    for (int i = 0; i < NUM_SHIPDESIGNS; ++i) {
++        orbit_in[i] = (i < e->shipdesigns_num) ? (int)e->orbit[from].ships[i] : 0;
++        dispatched[i] = 0;
++    }
+     if (from == dest) {
++        early = 0;
++        game_turn_fleet_send_trace_emit(g->year, (int)pi, (int)from, (int)dest, orbit_in, dispatched, 0, 0, g->enroute_num, seed_in, early);
+         return;
+     }
+     ait->tbl_force_own[from] = 0;
+     if (g->enroute_num == FLEET_ENROUTE_MAX) {
+         log_warning("fleet enroute table (size %i) full, could not leave orbit!\n", FLEET_ENROUTE_MAX);
++        early = 1;
++        game_turn_fleet_send_trace_emit(g->year, (int)pi, (int)from, (int)dest, orbit_in, dispatched, 0, 0, g->enroute_num, seed_in, early);
+         return;
+     }
+     pf = &(g->planet[from]);
+@@ -521,6 +569,12 @@ static void game_turn_fleet_send(struct game_s *g, struct ai_turn_p1_s *ait, pla
+         r->y = pf->y;
+         ++g->enroute_num;
+     }
++    /* DRG-DISPATCH-TRACE: capture dispatched ships array. */
++    if (num_shiptypes > 0) {
++        for (int i = 0; i < NUM_SHIPDESIGNS; ++i) dispatched[i] = (int)r->ships[i];
++        sent_num_shiptypes = (int)num_shiptypes;
++        sent_speed = (int)speed + 1;
++    }
+     {
+         bool all_sent = true;
+         if (g->ai_id == GAME_AI_CLASSICPLUS) {
+@@ -539,6 +593,8 @@ static void game_turn_fleet_send(struct game_s *g, struct ai_turn_p1_s *ait, pla
+             BOOLVEC_CLEAR(o->visible, NUM_SHIPDESIGNS);
+         }
+     }
++    /* DRG-DISPATCH-TRACE: emit ai_dispatch event after work completes. */
++    game_turn_fleet_send_trace_emit(g->year, (int)pi, (int)from, (int)dest, orbit_in, dispatched, sent_num_shiptypes, sent_speed, g->enroute_num, seed_in, early);
+ }
+ 
+ static void game_ai_classic_turn_p1_send_colony_ships(struct game_s *g, struct ai_turn_p1_s *ait, player_id_t pi)
+@@ -1654,6 +1710,9 @@ static void game_ai_classic_turn_p2_do(struct game_s *g, player_id_t pi)
+     shipresearch_t *srd = &(g->srd[pi]);
+     shipdesign_t *sd = &(srd->design[0]);
+     int num_non0 = 0;
++    /* DRG-DISPATCH-TRACE-2 2026-04-29: emit turn_p2_do entry so we can
++     * verify countdown timing matches between engines. */
++    LOG_EVENT(g->year, "turn_p2_do", "pi=%i countdown_post_dec=%i sd_num=%i", (int)pi, (int)e->ai_p2_countdown, (int)e->shipdesigns_num);
+     ait->have_pulsar = false;
+     ait->have_repulwarp = false;
+     for (player_id_t p2 = PLAYER_0; p2 < g->players; ++p2) {
+diff --git a/src/game/game_design.c b/src/game/game_design.c
+index 00f14c95..6d3fd651 100644
+--- a/src/game/game_design.c
++++ b/src/game/game_design.c
+@@ -750,6 +750,17 @@ void game_design_scrap(struct game_s *g, player_id_t player, int shipi, bool fla
+     if ((e->shipdesigns_num <= 1) || (shipi >= e->shipdesigns_num)) {
+         return;
+     }
++    /* DRG-DISPATCH-TRACE-2 2026-04-29: emit design_scrap so we can see
++     * when slot indices are shifted and which owner/slot is affected. */
++    {
++        int _num_non0 = 0;
++        for (int _k = 0; _k < e->shipdesigns_num; ++_k) {
++            if (g->srd[player].shipcount[_k] != 0) {
++                ++_num_non0;
++            }
++        }
++        LOG_EVENT(g->year, "design_scrap", "pi=%i shipi=%i sd_num=%i num_non0=%i", (int)player, shipi, (int)e->shipdesigns_num, _num_non0);
++    }
+     for (int i = shipi; i < (NUM_SHIPDESIGNS - 1); ++i) {
+         srd->year[i] = srd->year[i + 1];
+     }

@@ -1,0 +1,12 @@
+diff --git a/src/ui/cmdline/Makefile.am b/src/ui/cmdline/Makefile.am
+index 92d56f8b..292a8900 100644
+--- a/src/ui/cmdline/Makefile.am
++++ b/src/ui/cmdline/Makefile.am
+@@ -32,6 +32,7 @@ libuicmdline_a_SOURCES = \
+     uigame.c \
+     uigmap.c \
+     uiground.c \
++    uijumpscreen.c \
+     uihelp.c \
+     uihelp.h \
+     uiinput.c \

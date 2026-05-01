@@ -7,5 +7,7 @@ extern uint16_t rnd_0_nm1(uint16_t n, uint32_t *seed);
 extern uint16_t rnd_1_n(uint16_t n, uint32_t *seed);
 extern uint32_t rnd_get_new_seed(void);
 extern uint16_t rnd_bitfiddle(uint16_t ax);
+extern unsigned int rnd_get_call_count(void);
+extern void rnd_reset_call_count(void);
 
 #endif

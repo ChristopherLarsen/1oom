@@ -66,6 +66,30 @@ static void game_turn_trace_ships(char *buf, int buflen, const shipcount_t ships
     }
 }
 
+static int game_turn_diplo_relation1_sum(const struct game_s *g)
+{
+    int total = 0;
+    for (player_id_t i = PLAYER_0; i < g->players; ++i) {
+        const empiretechorbit_t *e = &(g->eto[i]);
+        for (player_id_t j = PLAYER_0; j < g->players; ++j) {
+            total += e->relation1[j];
+        }
+    }
+    return total;
+}
+
+static int game_turn_diplo_val_sum(const struct game_s *g)
+{
+    int total = 0;
+    for (player_id_t i = PLAYER_0; i < g->players; ++i) {
+        const empiretechorbit_t *e = &(g->eto[i]);
+        for (player_id_t j = PLAYER_0; j < g->players; ++j) {
+            total += e->diplo_val[j];
+        }
+    }
+    return total;
+}
+
 static void game_turn_limit_ships(struct game_s *g)
 {
     for (int ei = 0; ei < g->enroute_num; ++ei) {
@@ -373,6 +397,9 @@ static void game_turn_update_trade(struct game_s *g)
 
 static void game_turn_diplo_adjust(struct game_s *g)
 {
+    int rel_before, rel_after, diplo_before, diplo_after;
+    rel_before = game_turn_diplo_relation1_sum(g);
+    diplo_before = game_turn_diplo_val_sum(g);
     for (player_id_t i = PLAYER_0; i < g->players; ++i) {
         empiretechorbit_t *e = &(g->eto[i]);
         for (player_id_t j = i + 1; j < g->players; ++j) {
@@ -389,6 +416,11 @@ static void game_turn_diplo_adjust(struct game_s *g)
             }
         }
     }
+    rel_after = game_turn_diplo_relation1_sum(g);
+    diplo_after = game_turn_diplo_val_sum(g);
+    LOG_EVENT(g->year, "diplo_adjust", "block=treaty_trade rel1_before=%i rel1_after=%i diplo_before=%i diplo_after=%i", rel_before, rel_after, diplo_before, diplo_after);
+    rel_before = rel_after;
+    diplo_before = diplo_after;
     for (player_id_t i = PLAYER_0; i < g->players; ++i) {
         int s_ai;
         if (IS_HUMAN(g, i)) {
@@ -410,6 +442,11 @@ static void game_turn_diplo_adjust(struct game_s *g)
             }
         }
     }
+    rel_after = game_turn_diplo_relation1_sum(g);
+    diplo_after = game_turn_diplo_val_sum(g);
+    LOG_EVENT(g->year, "diplo_adjust", "block=fleet_fear rel1_before=%i rel1_after=%i diplo_before=%i diplo_after=%i", rel_before, rel_after, diplo_before, diplo_after);
+    rel_before = rel_after;
+    diplo_before = diplo_after;
     if ((g->year & 1) == 0) {
         uint8_t tbl_num_pp[PLAYER_NUM];
         int gscale = ((g->galaxy_size + 1) * 3);
@@ -443,6 +480,11 @@ static void game_turn_diplo_adjust(struct game_s *g)
             }
         }
     }
+    rel_after = game_turn_diplo_relation1_sum(g);
+    diplo_after = game_turn_diplo_val_sum(g);
+    LOG_EVENT(g->year, "diplo_adjust", "block=expansion_penalty rel1_before=%i rel1_after=%i diplo_before=%i diplo_after=%i", rel_before, rel_after, diplo_before, diplo_after);
+    rel_before = rel_after;
+    diplo_before = diplo_after;
     for (player_id_t i = PLAYER_0; i < g->players; ++i) {
         empiretechorbit_t *e = &(g->eto[i]);
         if (IS_HUMAN(g, i)) {
@@ -471,6 +513,11 @@ static void game_turn_diplo_adjust(struct game_s *g)
             }
         }
     }
+    rel_after = game_turn_diplo_relation1_sum(g);
+    diplo_after = game_turn_diplo_val_sum(g);
+    LOG_EVENT(g->year, "diplo_adjust", "block=relation_decay rel1_before=%i rel1_after=%i diplo_before=%i diplo_after=%i", rel_before, rel_after, diplo_before, diplo_after);
+    rel_before = rel_after;
+    diplo_before = diplo_after;
     for (player_id_t i = PLAYER_0; i < g->players; ++i) {
         empiretechorbit_t *e = &(g->eto[i]);
         for (player_id_t j = PLAYER_0; j < g->players; ++j) {
@@ -481,6 +528,9 @@ static void game_turn_diplo_adjust(struct game_s *g)
             }
         }
     }
+    rel_after = game_turn_diplo_relation1_sum(g);
+    diplo_after = game_turn_diplo_val_sum(g);
+    LOG_EVENT(g->year, "diplo_adjust", "block=relation_mirror rel1_before=%i rel1_after=%i diplo_before=%i diplo_after=%i", rel_before, rel_after, diplo_before, diplo_after);
 }
 
 static void game_add_planet_to_shield_finished(struct game_s *g, uint8_t pli, player_id_t owner)
@@ -1698,9 +1748,15 @@ struct game_end_s game_turn_process(struct game_s *g)
     game_turn_update_mood_blunder(g);
     game_update_have_reserve_fuel(g);
     game_ai->turn_p1(g);
+    /* DRG-RNG-TRACE-3: seed after turn_p1. */
+    LOG_EVENT(g->year, "turn_phase_seed", "phase=post_turn_p1 seed=%u", (unsigned)g->seed);
     game_ai->turn_p2(g);
+    /* DRG-RNG-TRACE-3: seed after turn_p2 (ship design). */
+    LOG_EVENT(g->year, "turn_phase_seed", "phase=post_turn_p2 seed=%u", (unsigned)g->seed);
     game_update_have_reserve_fuel(g);
     game_ai->turn_p3(g);
+    /* DRG-RNG-TRACE-3: seed after turn_p3. */
+    LOG_EVENT(g->year, "turn_phase_seed", "phase=post_turn_p3 seed=%u", (unsigned)g->seed);
     game_turn_init_z_finished(g);
     game_turn_send_transport(g);
     game_update_production(g);
@@ -1715,6 +1771,8 @@ struct game_end_s game_turn_process(struct game_s *g)
     game_turn_diplo_adjust(g);
     game_turn_build_def(g);
     game_turn_build_ship(g);
+    /* DRG-RNG-TRACE-3: seed after build_ship. */
+    LOG_EVENT(g->year, "turn_phase_seed", "phase=post_build_ship seed=%u", (unsigned)g->seed);
     game_turn_reserve(g);
     game_turn_build_ind(g);
     game_turn_move_ships(g);

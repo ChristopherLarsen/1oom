@@ -192,4 +192,9 @@ extern void ui_newships(struct game_s *g, int pi);
 extern void ui_copyprotection_check(struct game_s *g);
 extern void ui_copyprotection_lose(struct game_s *g, struct game_end_s *ge);
 
+/* DRG agent-orion patch: -jumpscreen dispatch. Each UI flavor (classic, cmdline,
+   nop) provides an implementation: classic does the real dispatch; cmdline/nop
+   stub log an error and return non-zero. */
+extern int ui_jumpscreen_dispatch(struct game_s *g, const char *spec);
+
 #endif

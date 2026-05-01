@@ -750,6 +750,17 @@ void game_design_scrap(struct game_s *g, player_id_t player, int shipi, bool fla
     if ((e->shipdesigns_num <= 1) || (shipi >= e->shipdesigns_num)) {
         return;
     }
+    /* DRG-DISPATCH-TRACE-2 2026-04-29: emit design_scrap so we can see
+     * when slot indices are shifted and which owner/slot is affected. */
+    {
+        int _num_non0 = 0;
+        for (int _k = 0; _k < e->shipdesigns_num; ++_k) {
+            if (g->srd[player].shipcount[_k] != 0) {
+                ++_num_non0;
+            }
+        }
+        LOG_EVENT(g->year, "design_scrap", "pi=%i shipi=%i sd_num=%i num_non0=%i", (int)player, shipi, (int)e->shipdesigns_num, _num_non0);
+    }
     for (int i = shipi; i < (NUM_SHIPDESIGNS - 1); ++i) {
         srd->year[i] = srd->year[i + 1];
     }

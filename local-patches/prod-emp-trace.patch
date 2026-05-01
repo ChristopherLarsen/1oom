@@ -1,0 +1,15 @@
+diff --git a/src/game/game_misc.c b/src/game/game_misc.c
+index 231009ce..99d0b70c 100644
+--- a/src/game/game_misc.c
++++ b/src/game/game_misc.c
+@@ -205,6 +205,10 @@ void game_update_production(struct game_s *g)
+             }
+             e->total_maint_bc = e->total_production_bc - actual_prod;
+             e->percent_prod_total_to_actual = e->total_production_bc ? ((actual_prod * 100) / e->total_production_bc) : 0;
++            LOG_EVENT(g->year, "prod_emp", "pi=%i total_prod=%i ship_m=%i bases_m=%i trade=%i spy_m=%i sec=%i tax=%i actual=%i pct=%i",
++                      pi, (int)e->total_production_bc, (int)e->ship_maint_bc, (int)e->bases_maint_bc,
++                      (int)e->total_trade_bc, (int)e->spying_maint_bc, (int)e->security, (int)e->tax,
++                      (int)actual_prod, (int)e->percent_prod_total_to_actual);
+         }
+         for (int i = 0; i < g->galaxy_stars; ++i) {
+             planet_t *p = &(g->planet[i]);

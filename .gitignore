@@ -1,6 +1,8 @@
 *.[oa]
 .a*.out
 .deps/
+.DS_Store
+*~
 Makefile
 Makefile.in
 config.log

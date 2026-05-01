@@ -1,0 +1,617 @@
+diff --git a/src/game/game.c b/src/game/game.c
+index 123a3446..667ec645 100644
+--- a/src/game/game.c
++++ b/src/game/game.c
+@@ -117,6 +117,18 @@ static void game_ai_gate_write_ship_array(FILE *f, const shipcount_t ships[NUM_S
+     fputc(']', f);
+ }
+ 
++static void game_ai_gate_write_contact_array(FILE *f, const uint8_t *contact, int players)
++{
++    fputc('[', f);
++    for (int i = 0; i < players; ++i) {
++        if (i != 0) {
++            fputc(',', f);
++        }
++        fprintf(f, "%d", BOOLVEC_IS1(contact, i) ? 1 : 0);
++    }
++    fputc(']', f);
++}
++
+ static void game_ai_gate_write_meta(FILE *f, const struct game_s *g)
+ {
+     fprintf(
+@@ -324,6 +336,40 @@ static void game_ai_gate_write_fleets(FILE *f, const struct game_s *g)
+     fputs("]}", f);
+ }
+ 
++static void game_ai_gate_write_diplo(FILE *f, const struct game_s *g)
++{
++    fputs("\"diplo\":[", f);
++    for (player_id_t pi = PLAYER_0; pi < g->players; ++pi) {
++        int relation1[PLAYER_NUM];
++        int relation_2[PLAYER_NUM];
++        int diplo_val[PLAYER_NUM];
++        int treaty_active[PLAYER_NUM];
++        const empiretechorbit_t *e = &(g->eto[pi]);
++        if (pi != PLAYER_0) {
++            fputc(',', f);
++        }
++        for (int other = 0; other < g->players; ++other) {
++            relation1[other] = e->relation1[other];
++            relation_2[other] = e->relation2[other];
++            diplo_val[other] = e->diplo_val[other];
++            treaty_active[other] = (e->treaty[other] != TREATY_NONE) ? 1 : 0;
++        }
++        fprintf(f, "{\"player\":%d,", pi);
++        fputs("\"relation1\":", f);
++        game_ai_gate_write_int_array(f, relation1, g->players);
++        fputs(",\"relation_2\":", f);
++        game_ai_gate_write_int_array(f, relation_2, g->players);
++        fputs(",\"diplo_val\":", f);
++        game_ai_gate_write_int_array(f, diplo_val, g->players);
++        fputs(",\"treaty_active\":", f);
++        game_ai_gate_write_int_array(f, treaty_active, g->players);
++        fputs(",\"contact\":", f);
++        game_ai_gate_write_contact_array(f, e->contact, g->players);
++        fputc('}', f);
++    }
++    fputc(']', f);
++}
++
+ static void game_ai_gate_write_checkpoint(FILE *f, const struct game_s *g, int turn)
+ {
+     fprintf(
+@@ -337,6 +383,8 @@ static void game_ai_gate_write_checkpoint(FILE *f, const struct game_s *g, int t
+     );
+     game_ai_gate_write_empires(f, g);
+     fputc(',', f);
++    game_ai_gate_write_diplo(f, g);
++    fputc(',', f);
+     game_ai_gate_write_planets(f, g);
+     fputc(',', f);
+     game_ai_gate_write_fleets(f, g);
+@@ -354,6 +402,15 @@ static int game_run_ai_gate(struct game_s *g, const char *path)
+         return -1;
+     }
+ 
++    /* DRG-FIXTURE-PATCH 2026-04-28: snapshot the original is_ai bitmask
++     * BEFORE forcing all players AI, so the optional -yearsave path below
++     * can write saves that reflect the user's intended human/AI layout
++     * (e.g. slot 0 = human) rather than the all-AI runtime mode ai-gate
++     * uses internally. Without this, saves load as all-AI games and break
++     * the screenshot-diff harness which renders from slot 0's POV. */
++    BOOLVEC_DECLARE(orig_is_ai, PLAYER_NUM);
++    BOOLVEC_COPY(orig_is_ai, g->is_ai, PLAYER_NUM);
++
+     for (player_id_t i = PLAYER_0; i < g->players; ++i) {
+         BOOLVEC_SET1(g->is_ai, i);
+     }
+@@ -363,6 +420,22 @@ static int game_run_ai_gate(struct game_s *g, const char *path)
+     game_ai_gate_write_meta(f, g);
+     fputs(",\"checkpoints\":[", f);
+     for (int turn = 1; turn <= 100; ++turn) {
++        /* DRG-FIXTURE-PATCH 2026-04-28: write a yearsave at start-of-turn
++         * when -yearsave is enabled, mirroring the UI loop's hook at
++         * game.c:1202 which fires inside UI_TURN_ACT_NEXT_TURN BEFORE
++         * game_turn_process. Save with the ORIGINAL is_ai bitmask so the
++         * resulting save captures the user's human/AI layout, then
++         * restore the all-AI mask so game_turn_process keeps running
++         * deterministically without any UI prompt. */
++        if (game_opt_year_save_enabled) {
++            BOOLVEC_DECLARE(saved_is_ai, PLAYER_NUM);
++            BOOLVEC_COPY(saved_is_ai, g->is_ai, PLAYER_NUM);
++            BOOLVEC_COPY(g->is_ai, orig_is_ai, PLAYER_NUM);
++            if (game_save_do_save_year(NULL, g)) {
++                log_error("Game: ai-gate could not create year save\n");
++            }
++            BOOLVEC_COPY(g->is_ai, saved_is_ai, PLAYER_NUM);
++        }
+         game_end = game_turn_process(g);
+         g->active_player = PLAYER_0;
+         if (game_ai_gate_is_checkpoint_turn(turn)) {
+@@ -1169,6 +1242,24 @@ int main_do(void)
+             return (ret == 0) ? 0 : 1;
+         }
+         ui_game_start(&game);
++        /* DRG agent-orion patch: -jumpscreen NAME[:ARGS] dispatches to a UI
++           screen function and exits, bypassing the normal turn loop. */
++        if (main_jumpscreen_spec != NULL) {
++            extern int hw_auto_shot_armed; /* hwsdl2.c */
++            extern int hw_auto_shot_fired; /* hwsdl2.c */
++            int jrc = ui_jumpscreen_dispatch(&game, main_jumpscreen_spec);
++            /* Silent-success detection: if MOO_AUTOSHOT was armed but the
++               screen function returned before the countdown fired, the
++               screen exited too quickly (e.g. ui_newtech with no pending
++               tech). Fail loudly instead of "succeeding" with no PNG. */
++            if (jrc == 0 && hw_auto_shot_armed && !hw_auto_shot_fired) {
++                log_error("Jumpscreen: '%s' returned without rendering long enough for autoshot to fire (no PNG written)\n", main_jumpscreen_spec);
++                jrc = 3;
++            }
++            ui_game_end(&game);
++            game_stop(&game);
++            return (jrc == 0) ? 0 : 1;
++        }
+         game_end.type = GAME_END_NONE;
+         while ((game_end.type == GAME_END_NONE) || (game_end.type == GAME_END_FINAL_WAR)) {
+             for (; ((game_end.type == GAME_END_NONE) || (game_end.type == GAME_END_FINAL_WAR)) && (game.active_player < game.players); ++game.active_player) {
+diff --git a/src/game/game_ai_classic.c b/src/game/game_ai_classic.c
+index b94bbde9..da28fc6b 100644
+--- a/src/game/game_ai_classic.c
++++ b/src/game/game_ai_classic.c
+@@ -83,6 +83,8 @@ static void game_ai_classic_new_game_init(struct game_s *g, player_id_t player,
+     /* XXX these shipi values are wrong, but fixed by first next turn */
+     e->shipi_colony = 1;
+     e->shipi_bomber = 4;
++    /* DRG-RNG-TRACE-3 2026-04-29: per-player seed after new_game_init. Keys sorted alphabetically to match Godot TraceLog output. */
++    LOG_EVENT(0, "new_game_init", "n_nearby=%i p2cd=%i p3cd=%i pi=%i seed_out=%u", n, (int)e->ai_p2_countdown, (int)e->ai_p3_countdown, (int)player, (unsigned)g->seed);
+ }
+ 
+ static void game_ai_classic_new_game_tech(struct game_s *g)
+@@ -107,6 +109,8 @@ static void game_ai_classic_new_game_tech(struct game_s *g)
+                 e->tech.cost[field] = tech * tech * 50;
+             }
+         }
++        /* DRG-RNG-TRACE-3 2026-04-29: per-player seed after new_game_tech. */
++        LOG_EVENT(0, "new_game_tech", "pi=%i seed_out=%u", (int)pli, (unsigned)g->seed);
+     }
+ }
+ 
+@@ -150,6 +154,12 @@ static int game_ai_best_speed(const struct game_s *g, player_id_t player_i)
+     return game_tech_player_best_tech(g, TECH_FIELD_PROPULSION, 0, 6, 50, player_i) + 3;
+ }
+ 
++/* DRG-DISPATCH-TRACE 2026-04-29: forward decl so send_scout can call it. */
++static void game_turn_fleet_send_trace_emit(int year, int pi, int from, int dest,
++                                            const int *orbit_in, const int *dispatched,
++                                            int num_shiptypes, int speed,
++                                            int enroute_after, uint32_t seed_in, int early);
++
+ static void game_ai_classic_turn_p1_send_scout(struct game_s *g, struct ai_turn_p1_s *ait, player_id_t pi)
+ {
+     empiretechorbit_t *e = &(g->eto[pi]);
+@@ -252,6 +262,14 @@ static void game_ai_classic_turn_p1_send_scout(struct game_s *g, struct ai_turn_
+                     fleet_enroute_t *r;
+                     const planet_t *p2 = &(g->planet[mini]);
+                     shipcount_t num_send;
++                    /* DRG-DISPATCH-TRACE: snapshot orbit and seed BEFORE mutating. */
++                    int _scout_orbit_in[NUM_SHIPDESIGNS];
++                    int _scout_dispatched[NUM_SHIPDESIGNS];
++                    uint32_t _scout_seed_in = g->seed;
++                    for (int k = 0; k < NUM_SHIPDESIGNS; ++k) {
++                        _scout_orbit_in[k] = (k < e->shipdesigns_num) ? (int)t[k] : 0;
++                        _scout_dispatched[k] = 0;
++                    }
+                     r = &(g->enroute[g->enroute_num++]);
+                     num_send = t[shipi] / 4 + 1;
+                     r->dest = pli;
+@@ -268,6 +286,9 @@ static void game_ai_classic_turn_p1_send_scout(struct game_s *g, struct ai_turn_
+                     BOOLVEC_SET1(r->visible, pi);
+                     t[shipi] -= num_send;
+                     tbl_ownorbit[mini] -= num_send;
++                    /* DRG-DISPATCH-TRACE: emit ai_dispatch event for scout dispatch. */
++                    _scout_dispatched[shipi] = (int)num_send;
++                    game_turn_fleet_send_trace_emit(g->year, (int)pi, (int)mini, (int)pli, _scout_orbit_in, _scout_dispatched, 1, (int)g->srd[pi].design[shipi].engine + 1, g->enroute_num, _scout_seed_in, -1);
+                 }
+             }
+         }
+@@ -467,6 +488,22 @@ static bool game_ai_classic_turn_p1_have_colony_ship(struct game_s *g, struct ai
+     return true;
+ }
+ 
++/* DRG-DISPATCH-TRACE 2026-04-29: emit one ai_dispatch event per
++ * game_turn_fleet_send call so we can diff the two engines and
++ * locate the first non-matching dispatch decision. */
++static void game_turn_fleet_send_trace_emit(int year, int pi, int from, int dest,
++                                            const int *orbit_in, const int *dispatched,
++                                            int num_shiptypes, int speed,
++                                            int enroute_after, uint32_t seed_in, int early)
++{
++    LOG_EVENT(year, "ai_dispatch",
++              "pi=%i from=%i dest=%i orbit_in=[%i,%i,%i,%i,%i,%i] ships=[%i,%i,%i,%i,%i,%i] num_shiptypes=%i speed=%i enroute_after=%i seed_in=%u early=%i",
++              pi, from, dest,
++              orbit_in[0], orbit_in[1], orbit_in[2], orbit_in[3], orbit_in[4], orbit_in[5],
++              dispatched[0], dispatched[1], dispatched[2], dispatched[3], dispatched[4], dispatched[5],
++              num_shiptypes, speed, enroute_after, (unsigned int)seed_in, early);
++}
++
+ static void game_turn_fleet_send(struct game_s *g, struct ai_turn_p1_s *ait, player_id_t pi, uint8_t from, uint8_t dest)
+ {
+     empiretechorbit_t *e = &(g->eto[pi]);
+@@ -474,12 +511,27 @@ static void game_turn_fleet_send(struct game_s *g, struct ai_turn_p1_s *ait, pla
+     const planet_t *pf, *pt;
+     fleet_orbit_t *o;
+     uint8_t speed, num_shiptypes;
++    /* DRG-DISPATCH-TRACE: snapshot seed and orbit inventory before any work. */
++    uint32_t seed_in = g->seed;
++    int orbit_in[NUM_SHIPDESIGNS];
++    int dispatched[NUM_SHIPDESIGNS];
++    int sent_num_shiptypes = 0;
++    int sent_speed = 0;
++    int early = -1;
++    for (int i = 0; i < NUM_SHIPDESIGNS; ++i) {
++        orbit_in[i] = (i < e->shipdesigns_num) ? (int)e->orbit[from].ships[i] : 0;
++        dispatched[i] = 0;
++    }
+     if (from == dest) {
++        early = 0;
++        game_turn_fleet_send_trace_emit(g->year, (int)pi, (int)from, (int)dest, orbit_in, dispatched, 0, 0, g->enroute_num, seed_in, early);
+         return;
+     }
+     ait->tbl_force_own[from] = 0;
+     if (g->enroute_num == FLEET_ENROUTE_MAX) {
+         log_warning("fleet enroute table (size %i) full, could not leave orbit!\n", FLEET_ENROUTE_MAX);
++        early = 1;
++        game_turn_fleet_send_trace_emit(g->year, (int)pi, (int)from, (int)dest, orbit_in, dispatched, 0, 0, g->enroute_num, seed_in, early);
+         return;
+     }
+     pf = &(g->planet[from]);
+@@ -521,6 +573,12 @@ static void game_turn_fleet_send(struct game_s *g, struct ai_turn_p1_s *ait, pla
+         r->y = pf->y;
+         ++g->enroute_num;
+     }
++    /* DRG-DISPATCH-TRACE: capture dispatched ships array. */
++    if (num_shiptypes > 0) {
++        for (int i = 0; i < NUM_SHIPDESIGNS; ++i) dispatched[i] = (int)r->ships[i];
++        sent_num_shiptypes = (int)num_shiptypes;
++        sent_speed = (int)speed + 1;
++    }
+     {
+         bool all_sent = true;
+         if (g->ai_id == GAME_AI_CLASSICPLUS) {
+@@ -539,6 +597,8 @@ static void game_turn_fleet_send(struct game_s *g, struct ai_turn_p1_s *ait, pla
+             BOOLVEC_CLEAR(o->visible, NUM_SHIPDESIGNS);
+         }
+     }
++    /* DRG-DISPATCH-TRACE: emit ai_dispatch event after work completes. */
++    game_turn_fleet_send_trace_emit(g->year, (int)pi, (int)from, (int)dest, orbit_in, dispatched, sent_num_shiptypes, sent_speed, g->enroute_num, seed_in, early);
+ }
+ 
+ static void game_ai_classic_turn_p1_send_colony_ships(struct game_s *g, struct ai_turn_p1_s *ait, player_id_t pi)
+@@ -1590,10 +1650,14 @@ again:
+     ait->shiplook = game_ai_classic_design_ship_get_look(g, pi, ait->hull);
+     sd->wpnn[0] = 0;
+     for (int loops2 = 0; (sd->wpnn[0] == 0) && (loops2 < 100000); ++loops2) {
++        LOG_EVENT(g->year, "design_seed", "hull=%i loops=%i loops2=%i pi=%i seed=%u shiptype=%i site=pre_prepare", (int)ait->hull, loops, loops2, (int)pi, (unsigned)g->seed, (int)ait->shiptype);
+         game_design_prepare_ai(g, &ait->gd, pi, ait->hull, ait->shiplook);
++        LOG_EVENT(g->year, "design_seed", "hull=%i loops=%i loops2=%i pi=%i seed=%u shiptype=%i site=post_prepare", (int)ait->hull, loops, loops2, (int)pi, (unsigned)g->seed, (int)ait->shiptype);
+         game_ai_classic_design_ship_base(g, ait, pi);
++        LOG_EVENT(g->year, "design_seed", "hull=%i loops=%i loops2=%i pi=%i seed=%u shiptype=%i site=post_base", (int)ait->hull, loops, loops2, (int)pi, (unsigned)g->seed, (int)ait->shiptype);
+         game_ai_classic_design_ship_sub2(g, ait, pi);
+         game_ai_classic_design_ship_weapons(g, ait, pi);
++        LOG_EVENT(g->year, "design_seed", "hull=%i loops=%i loops2=%i pi=%i seed=%u shiptype=%i site=post_weapons", (int)ait->hull, loops, loops2, (int)pi, (unsigned)g->seed, (int)ait->shiptype);
+         game_design_set_hp(sd);
+         game_design_compact_slots(sd);
+         if (ait->shiptype == 0/*colony*/) {
+@@ -1654,6 +1718,9 @@ static void game_ai_classic_turn_p2_do(struct game_s *g, player_id_t pi)
+     shipresearch_t *srd = &(g->srd[pi]);
+     shipdesign_t *sd = &(srd->design[0]);
+     int num_non0 = 0;
++    /* DRG-DISPATCH-TRACE-2 2026-04-29: emit turn_p2_do entry so we can
++     * verify countdown timing matches between engines. */
++    LOG_EVENT(g->year, "turn_p2_do", "pi=%i countdown_post_dec=%i sd_num=%i", (int)pi, (int)e->ai_p2_countdown, (int)e->shipdesigns_num);
+     ait->have_pulsar = false;
+     ait->have_repulwarp = false;
+     for (player_id_t p2 = PLAYER_0; p2 < g->players; ++p2) {
+@@ -1679,6 +1746,7 @@ static void game_ai_classic_turn_p2_do(struct game_s *g, player_id_t pi)
+         }
+     }
+     e->ai_p2_countdown = rnd_1_n(12, &g->seed) + 8;
++    LOG_EVENT(g->year, "p2_seed", "pi=%i seed=%u site=post_countdown", (int)pi, (unsigned)g->seed);
+     game_update_maint_costs(g);
+     e->shipi_colony = -1;
+     e->shipi_bomber = -1;
+@@ -1739,6 +1807,7 @@ static void game_ai_classic_turn_p2_do(struct game_s *g, player_id_t pi)
+     }
+     for (int loops = 0; (e->shipdesigns_num < NUM_SHIPDESIGNS) && (loops < 10000); ++loops) {
+         int si;
++        uint32_t seed_before_design;
+         si = e->shipdesigns_num;
+         if (e->shipi_colony == -1) {
+             e->shipi_colony = si;
+@@ -1749,7 +1818,9 @@ static void game_ai_classic_turn_p2_do(struct game_s *g, player_id_t pi)
+         } else {
+             ait->shiptype = 1/*fighter*/;
+         }
++        seed_before_design = (uint32_t)g->seed;
+         game_ai_classic_design_ship(g, ait, pi);
++        LOG_EVENT(g->year, "p2_seed", "loop=%i pi=%i seed_in=%u seed_out=%u shiptype=%i site=post_design_ship", loops, (int)pi, (unsigned)seed_before_design, (unsigned)g->seed, (int)ait->shiptype);
+     }
+     if (e->shipdesigns_num < NUM_SHIPDESIGNS) {
+         log_fatal_and_die("BUG: %s hang\n", __func__);
+@@ -1792,6 +1863,7 @@ static void game_ai_classic_turn_p2_do(struct game_s *g, player_id_t pi)
+                 }
+             }
+         }
++        LOG_EVENT(g->year, "p2_seed", "pi=%i seed=%u site=pre_buildship", (int)pi, (unsigned)g->seed);
+         for (int i = 0; i < g->galaxy_stars; ++i) {
+             planet_t *p = &(g->planet[i]);
+             if (p->owner == pi) {
+@@ -1804,6 +1876,7 @@ static void game_ai_classic_turn_p2_do(struct game_s *g, player_id_t pi)
+                 p->buildship = n;
+             }
+         }
++        LOG_EVENT(g->year, "p2_seed", "pi=%i seed=%u site=post_buildship", (int)pi, (unsigned)g->seed);
+     }
+ }
+ 
+diff --git a/src/game/game_design.c b/src/game/game_design.c
+index 00f14c95..6d3fd651 100644
+--- a/src/game/game_design.c
++++ b/src/game/game_design.c
+@@ -750,6 +750,17 @@ void game_design_scrap(struct game_s *g, player_id_t player, int shipi, bool fla
+     if ((e->shipdesigns_num <= 1) || (shipi >= e->shipdesigns_num)) {
+         return;
+     }
++    /* DRG-DISPATCH-TRACE-2 2026-04-29: emit design_scrap so we can see
++     * when slot indices are shifted and which owner/slot is affected. */
++    {
++        int _num_non0 = 0;
++        for (int _k = 0; _k < e->shipdesigns_num; ++_k) {
++            if (g->srd[player].shipcount[_k] != 0) {
++                ++_num_non0;
++            }
++        }
++        LOG_EVENT(g->year, "design_scrap", "pi=%i shipi=%i sd_num=%i num_non0=%i", (int)player, shipi, (int)e->shipdesigns_num, _num_non0);
++    }
+     for (int i = shipi; i < (NUM_SHIPDESIGNS - 1); ++i) {
+         srd->year[i] = srd->year[i + 1];
+     }
+diff --git a/src/game/game_misc.c b/src/game/game_misc.c
+index 231009ce..99d0b70c 100644
+--- a/src/game/game_misc.c
++++ b/src/game/game_misc.c
+@@ -205,6 +205,10 @@ void game_update_production(struct game_s *g)
+             }
+             e->total_maint_bc = e->total_production_bc - actual_prod;
+             e->percent_prod_total_to_actual = e->total_production_bc ? ((actual_prod * 100) / e->total_production_bc) : 0;
++            LOG_EVENT(g->year, "prod_emp", "pi=%i total_prod=%i ship_m=%i bases_m=%i trade=%i spy_m=%i sec=%i tax=%i actual=%i pct=%i",
++                      pi, (int)e->total_production_bc, (int)e->ship_maint_bc, (int)e->bases_maint_bc,
++                      (int)e->total_trade_bc, (int)e->spying_maint_bc, (int)e->security, (int)e->tax,
++                      (int)actual_prod, (int)e->percent_prod_total_to_actual);
+         }
+         for (int i = 0; i < g->galaxy_stars; ++i) {
+             planet_t *p = &(g->planet[i]);
+diff --git a/src/game/game_new.c b/src/game/game_new.c
+index 114e3616..3aafdd54 100644
+--- a/src/game/game_new.c
++++ b/src/game/game_new.c
+@@ -1117,6 +1117,23 @@ int game_new(struct game_s *g, struct game_aux_s *gaux, struct game_new_options_
+         }
+     }
+     researchflag[TECH_FIELD_WEAPON * 50 + (TECH_WEAP_DEATH_RAY - 1)] = 0;
++    /* DRG-RNG-TRACE-3 2026-04-29: dump rflag availability bits per field.
++     * Each field emits 50 bits as a 13-hex-char string (50 bits -> ceil(50/4)=13 nybbles).
++     * Allows comparison with Godot TechTable.is_unused() to test the D4 hypothesis. */
++    {
++        for (int _f = 0; _f < 6; ++_f) {
++            char _hex[14] = {0};
++            unsigned long long _bits = 0;
++            for (int _t = 49; _t >= 0; --_t) {
++                _bits = (_bits << 1) | (researchflag[_f * 50 + _t] ? 1 : 0);
++            }
++            for (int _h = 12; _h >= 0; --_h) {
++                _hex[_h] = "0123456789abcdef"[_bits & 0xf];
++                _bits >>= 4;
++            }
++            LOG_EVENT(0, "rflag_field", "bits=%s field=%i", _hex, _f);
++        }
++    }
+     {
+         uint32_t vo, vr = 0, vb = 0, m = 1, va = 0;
+         vo = g->difficulty + g->galaxy_size * 10 + g->players * 100;
+@@ -1133,8 +1150,14 @@ int game_new(struct game_s *g, struct game_aux_s *gaux, struct game_new_options_
+         log_message("Game: new game -new %u:0x%x:%u:0x%x:%u -nga %u\n", vo, vr, vb, g->galaxy_seed, va, g->ai_id);
+     }
+     game_generate_home_etc(g, opt);
++    /* DRG-RNG-TRACE-3: seed after home+AI-init (new_game_init consumes RNG here). */
++    LOG_EVENT(0, "seed_checkpoint", "phase=post_home_etc seed=%u", (unsigned)g->seed);
+     game_generate_relation_etc(g);
++    /* DRG-RNG-TRACE-3: seed after relation_etc (no RNG; checkpoint for alignment). */
++    LOG_EVENT(0, "seed_checkpoint", "phase=post_relation_etc seed=%u", (unsigned)g->seed);
+     game_generate_research(g, researchflag);
++    /* DRG-RNG-TRACE-3: seed after research generation (heavy RNG consumer). */
++    LOG_EVENT(0, "seed_checkpoint", "phase=post_research seed=%u", (unsigned)g->seed);
+     game_generate_misc(g);
+     if (!game_num_update_on_load) {
+         game_generate_load(g);
+@@ -1158,6 +1181,8 @@ int game_new(struct game_s *g, struct game_aux_s *gaux, struct game_new_options_
+         game_generate_emperor_names(g, namedata);
+         lbxfile_item_release(LBXFILE_NAMES, namedata);
+     }
++    /* DRG-RNG-TRACE-3: seed after emperor names (RNG consumed per non-AI player). */
++    LOG_EVENT(0, "seed_checkpoint", "phase=post_emperor_names seed=%u", (unsigned)g->seed);
+     g->active_player = PLAYER_0;
+     return 0;
+ }
+diff --git a/src/game/game_turn.c b/src/game/game_turn.c
+index 2c1e13d6..7aba9f3a 100644
+--- a/src/game/game_turn.c
++++ b/src/game/game_turn.c
+@@ -66,6 +66,30 @@ static void game_turn_trace_ships(char *buf, int buflen, const shipcount_t ships
+     }
+ }
+ 
++static int game_turn_diplo_relation1_sum(const struct game_s *g)
++{
++    int total = 0;
++    for (player_id_t i = PLAYER_0; i < g->players; ++i) {
++        const empiretechorbit_t *e = &(g->eto[i]);
++        for (player_id_t j = PLAYER_0; j < g->players; ++j) {
++            total += e->relation1[j];
++        }
++    }
++    return total;
++}
++
++static int game_turn_diplo_val_sum(const struct game_s *g)
++{
++    int total = 0;
++    for (player_id_t i = PLAYER_0; i < g->players; ++i) {
++        const empiretechorbit_t *e = &(g->eto[i]);
++        for (player_id_t j = PLAYER_0; j < g->players; ++j) {
++            total += e->diplo_val[j];
++        }
++    }
++    return total;
++}
++
+ static void game_turn_limit_ships(struct game_s *g)
+ {
+     for (int ei = 0; ei < g->enroute_num; ++ei) {
+@@ -373,6 +397,9 @@ static void game_turn_update_trade(struct game_s *g)
+ 
+ static void game_turn_diplo_adjust(struct game_s *g)
+ {
++    int rel_before, rel_after, diplo_before, diplo_after;
++    rel_before = game_turn_diplo_relation1_sum(g);
++    diplo_before = game_turn_diplo_val_sum(g);
+     for (player_id_t i = PLAYER_0; i < g->players; ++i) {
+         empiretechorbit_t *e = &(g->eto[i]);
+         for (player_id_t j = i + 1; j < g->players; ++j) {
+@@ -389,6 +416,11 @@ static void game_turn_diplo_adjust(struct game_s *g)
+             }
+         }
+     }
++    rel_after = game_turn_diplo_relation1_sum(g);
++    diplo_after = game_turn_diplo_val_sum(g);
++    LOG_EVENT(g->year, "diplo_adjust", "block=treaty_trade rel1_before=%i rel1_after=%i diplo_before=%i diplo_after=%i", rel_before, rel_after, diplo_before, diplo_after);
++    rel_before = rel_after;
++    diplo_before = diplo_after;
+     for (player_id_t i = PLAYER_0; i < g->players; ++i) {
+         int s_ai;
+         if (IS_HUMAN(g, i)) {
+@@ -410,6 +442,11 @@ static void game_turn_diplo_adjust(struct game_s *g)
+             }
+         }
+     }
++    rel_after = game_turn_diplo_relation1_sum(g);
++    diplo_after = game_turn_diplo_val_sum(g);
++    LOG_EVENT(g->year, "diplo_adjust", "block=fleet_fear rel1_before=%i rel1_after=%i diplo_before=%i diplo_after=%i", rel_before, rel_after, diplo_before, diplo_after);
++    rel_before = rel_after;
++    diplo_before = diplo_after;
+     if ((g->year & 1) == 0) {
+         uint8_t tbl_num_pp[PLAYER_NUM];
+         int gscale = ((g->galaxy_size + 1) * 3);
+@@ -443,6 +480,11 @@ static void game_turn_diplo_adjust(struct game_s *g)
+             }
+         }
+     }
++    rel_after = game_turn_diplo_relation1_sum(g);
++    diplo_after = game_turn_diplo_val_sum(g);
++    LOG_EVENT(g->year, "diplo_adjust", "block=expansion_penalty rel1_before=%i rel1_after=%i diplo_before=%i diplo_after=%i", rel_before, rel_after, diplo_before, diplo_after);
++    rel_before = rel_after;
++    diplo_before = diplo_after;
+     for (player_id_t i = PLAYER_0; i < g->players; ++i) {
+         empiretechorbit_t *e = &(g->eto[i]);
+         if (IS_HUMAN(g, i)) {
+@@ -471,6 +513,11 @@ static void game_turn_diplo_adjust(struct game_s *g)
+             }
+         }
+     }
++    rel_after = game_turn_diplo_relation1_sum(g);
++    diplo_after = game_turn_diplo_val_sum(g);
++    LOG_EVENT(g->year, "diplo_adjust", "block=relation_decay rel1_before=%i rel1_after=%i diplo_before=%i diplo_after=%i", rel_before, rel_after, diplo_before, diplo_after);
++    rel_before = rel_after;
++    diplo_before = diplo_after;
+     for (player_id_t i = PLAYER_0; i < g->players; ++i) {
+         empiretechorbit_t *e = &(g->eto[i]);
+         for (player_id_t j = PLAYER_0; j < g->players; ++j) {
+@@ -481,6 +528,9 @@ static void game_turn_diplo_adjust(struct game_s *g)
+             }
+         }
+     }
++    rel_after = game_turn_diplo_relation1_sum(g);
++    diplo_after = game_turn_diplo_val_sum(g);
++    LOG_EVENT(g->year, "diplo_adjust", "block=relation_mirror rel1_before=%i rel1_after=%i diplo_before=%i diplo_after=%i", rel_before, rel_after, diplo_before, diplo_after);
+ }
+ 
+ static void game_add_planet_to_shield_finished(struct game_s *g, uint8_t pli, player_id_t owner)
+@@ -1698,9 +1748,15 @@ struct game_end_s game_turn_process(struct game_s *g)
+     game_turn_update_mood_blunder(g);
+     game_update_have_reserve_fuel(g);
+     game_ai->turn_p1(g);
++    /* DRG-RNG-TRACE-3: seed after turn_p1. */
++    LOG_EVENT(g->year, "turn_phase_seed", "phase=post_turn_p1 seed=%u", (unsigned)g->seed);
+     game_ai->turn_p2(g);
++    /* DRG-RNG-TRACE-3: seed after turn_p2 (ship design). */
++    LOG_EVENT(g->year, "turn_phase_seed", "phase=post_turn_p2 seed=%u", (unsigned)g->seed);
+     game_update_have_reserve_fuel(g);
+     game_ai->turn_p3(g);
++    /* DRG-RNG-TRACE-3: seed after turn_p3. */
++    LOG_EVENT(g->year, "turn_phase_seed", "phase=post_turn_p3 seed=%u", (unsigned)g->seed);
+     game_turn_init_z_finished(g);
+     game_turn_send_transport(g);
+     game_update_production(g);
+@@ -1715,6 +1771,8 @@ struct game_end_s game_turn_process(struct game_s *g)
+     game_turn_diplo_adjust(g);
+     game_turn_build_def(g);
+     game_turn_build_ship(g);
++    /* DRG-RNG-TRACE-3: seed after build_ship. */
++    LOG_EVENT(g->year, "turn_phase_seed", "phase=post_build_ship seed=%u", (unsigned)g->seed);
+     game_turn_reserve(g);
+     game_turn_build_ind(g);
+     game_turn_move_ships(g);
+diff --git a/src/main.c b/src/main.c
+index 83b210a2..8d85b495 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -23,6 +23,11 @@ const char *main_replay_file = NULL;
+ const char *main_autoshot_dir = NULL;
+ const char *main_shotkey_name = "F12";
+ int main_replay_current_year = -1;
++/* DRG agent-orion patch: -jumpscreen NAME[:ARGS] for autonomous screen capture. */
++const char *main_jumpscreen_spec = NULL;
++/* Set by the HW backend's autoshot path; read by game.c silent-success check. */
++int hw_auto_shot_armed = 0;
++int hw_auto_shot_fired = 0;
+ 
+ /* -------------------------------------------------------------------------- */
+ 
+@@ -212,6 +217,19 @@ static int main_filter_trace_args(int argc, char **argv, int *argc_out, char ***
+             ++i;
+             continue;
+         }
++        /* DRG agent-orion patch: -jumpscreen NAME[:ARGS] dispatches directly
++           to a UI screen function after game load, then exits. Combine with
++           MOO_AUTOSHOT_FRAMES + MOO_AUTOSHOT_PATH for autonomous capture. */
++        if (strcmp(argv[i], "-jumpscreen") == 0) {
++            if ((i + 1) >= argc) {
++                log_error("option '-jumpscreen' is missing the parameter\n");
++                free(argv_filtered);
++                return -1;
++            }
++            main_jumpscreen_spec = argv[i + 1];
++            ++i;
++            continue;
++        }
+         argv_filtered[argc_filtered++] = argv[i];
+     }
+     if (replay_load_filename != NULL) {
+diff --git a/src/main.h b/src/main.h
+index 7e8c3efa..868f6fb2 100644
+--- a/src/main.h
++++ b/src/main.h
+@@ -12,6 +12,8 @@ extern const struct cmdline_options_s main_cmdline_options_early[];
+ extern const char *main_replay_file;
+ extern const char *main_autoshot_dir;
+ extern const char *main_shotkey_name;
++/* DRG agent-orion patch: -jumpscreen NAME[:ARGS] for autonomous screen capture. */
++extern const char *main_jumpscreen_spec;
+ extern int main_replay_current_year;
+ extern int main_handle_option(const char *argv);
+ extern void (*main_usage)(void);
+diff --git a/src/ui.h b/src/ui.h
+index 11419091..3b79a59b 100644
+--- a/src/ui.h
++++ b/src/ui.h
+@@ -192,4 +192,9 @@ extern void ui_newships(struct game_s *g, int pi);
+ extern void ui_copyprotection_check(struct game_s *g);
+ extern void ui_copyprotection_lose(struct game_s *g, struct game_end_s *ge);
+ 
++/* DRG agent-orion patch: -jumpscreen dispatch. Each UI flavor (classic, cmdline,
++   nop) provides an implementation: classic does the real dispatch; cmdline/nop
++   stub log an error and return non-zero. */
++extern int ui_jumpscreen_dispatch(struct game_s *g, const char *spec);
++
+ #endif

@@ -202,6 +202,34 @@ extern const char *os_get_path_user(void);
 static SDL_Keycode hw_screenshot_key = SDLK_F12;
 static int hw_screenshot_count = 0;
 
+/* ------------------------------------------------------------------------- */
+/* agent-orion patch: env-driven auto-screenshot for autonomous capture.
+   Lets Claude Code (or any non-interactive caller) grab a screenshot of the
+   current 1oom screen without needing macOS Screen Recording or Accessibility
+   permissions to send F12 to the SDL2 window.
+
+   Env vars:
+     MOO_AUTOSHOT_FRAMES=N   take a shot after N hw_event_handle() ticks (~60/s)
+                             default: disabled (-1)
+     MOO_AUTOSHOT_PATH=PATH  absolute path of the PNG to write (overrides the
+                             default ~/.config/1oom/shots/shotNNNN.png)
+                             default: unset → use the standard manual-shot path
+     MOO_AUTOSHOT_EXIT=0     stay running after the shot (default: exit cleanly)
+
+   Typical use:
+     MOO_AUTOSHOT_FRAMES=180 \
+     MOO_AUTOSHOT_PATH=/abs/path/to/Reference\ Screens/Orion\ Intro.png \
+       ./1oom_classic_sdl2 -data ./MOO -nolog -cro
+*/
+static int hw_auto_shot_remaining = -1;
+static const char *hw_auto_shot_path = NULL;
+static int hw_auto_shot_exit_after = 1;
+/* DRG agent-orion: hw_auto_shot_armed / hw_auto_shot_fired live in main.c
+   so they exist for any HW backend (cmdline, sdl1, sdl2). hwsdl2 sets them. */
+extern int hw_auto_shot_armed;
+extern int hw_auto_shot_fired;
+extern int hw_video_screenshot_png(const char *filename);
+
 /* -------------------------------------------------------------------------- */
 
 #define SDL1or2Key  SDL_Keycode
@@ -989,6 +1017,31 @@ int hw_init(void)
     if (hw_opt_relmouse) {
         SDL_EventState(SDL_MOUSEMOTION, SDL_IGNORE);
     }
+    /* agent-orion patch: configure env-driven auto-screenshot. */
+    {
+        const char *s = getenv("MOO_AUTOSHOT_FRAMES");
+        if (s && s[0]) {
+            int n = atoi(s);
+            if (n > 0) {
+                hw_auto_shot_remaining = n;
+                hw_auto_shot_armed = 1;
+                hw_auto_shot_path = getenv("MOO_AUTOSHOT_PATH");
+                if (hw_auto_shot_path && hw_auto_shot_path[0] == '\0') {
+                    hw_auto_shot_path = NULL;
+                }
+                {
+                    const char *exitstr = getenv("MOO_AUTOSHOT_EXIT");
+                    if (exitstr && exitstr[0] == '0') {
+                        hw_auto_shot_exit_after = 0;
+                    }
+                }
+                log_message("AutoShot: armed for %d frames%s%s%s\n", n,
+                    hw_auto_shot_path ? ", path='" : "",
+                    hw_auto_shot_path ? hw_auto_shot_path : "",
+                    hw_auto_shot_path ? "'" : "");
+            }
+        }
+    }
     return 0;
 }
 
@@ -1016,6 +1069,31 @@ void hw_textinput_stop(void)
 int hw_event_handle(void)
 {
     SDL_Event e;
+
+    /* agent-orion patch: env-driven auto-screenshot countdown. */
+    if (hw_auto_shot_remaining > 0) {
+        --hw_auto_shot_remaining;
+        if (hw_auto_shot_remaining == 0) {
+            int rc;
+            if (hw_auto_shot_path != NULL) {
+                rc = hw_video_screenshot_png(hw_auto_shot_path);
+                if (rc == 0) {
+                    log_message("AutoShot: wrote '%s'\n", hw_auto_shot_path);
+                    hw_auto_shot_fired = 1;
+                } else {
+                    log_error("AutoShot: failed to write '%s' (rc=%d)\n", hw_auto_shot_path, rc);
+                }
+            } else {
+                hw_manual_screenshot();
+                hw_auto_shot_fired = 1;
+            }
+            if (hw_auto_shot_exit_after) {
+                log_message("AutoShot: exiting cleanly\n");
+                exit(0);
+            }
+            hw_auto_shot_remaining = -1;
+        }
+    }
 
     replay_step();
     SDL_PumpEvents();

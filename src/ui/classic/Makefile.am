@@ -40,6 +40,8 @@ libuiclassic_a_SOURCES = \
     uigame.c \
     uigameopts.c \
     uigameopts.h \
+    uijumpscreen.c \
+    uijumpscreen.h \
     uigmap.c \
     uigmap.h \
     uiground.c \
