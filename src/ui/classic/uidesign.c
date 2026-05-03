@@ -1293,3 +1293,37 @@ bool ui_design(struct game_s *g, struct game_design_s *gd, player_id_t active_pl
     uiobj_set_help_id(-1);
     return flag_ret;
 }
+
+bool ui_design_jumpscreen_picker(struct game_s *g, struct game_design_s *gd, player_id_t active_player, int selmode)
+{
+    struct ui_design_data_s u;
+    struct design_data_s d;
+    shipdesign_t *sd = &(gd->sd);
+
+    d.g = g;
+    d.gd = gd;
+    d.api = active_player;
+    u.d = &d;
+
+    design_clear_ois(&u);
+    sd->look = gd->tbl_shiplook_hull[sd->hull];
+
+    uiobj_table_clear();
+    uiobj_set_xyoff(0, 0);
+    design_init_ois(&u);
+    game_design_init_maxtech_haveflags(&d);
+
+    uiobj_set_help_id(5);
+    design_draw_cb(&u);
+    ui_palette_set_n();
+    uiobj_finish_frame();
+    ui_draw_copy_buf();
+
+    ui_design_sub(&u, (design_slot_t)selmode);
+
+    game_design_compact_slots(sd);
+    uiobj_table_clear();
+    uiobj_unset_callback();
+    uiobj_set_help_id(-1);
+    return false;
+}

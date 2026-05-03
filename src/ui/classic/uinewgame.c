@@ -1,5 +1,6 @@
 #include "config.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "ui.h"
@@ -142,6 +143,56 @@ static int16_t ui_new_game_choose_race(struct game_new_options_s *newopts, struc
     return race;
 }
 
+static bool new_game_jumpscreen_write_autoshot(void)
+{
+    const char *path = getenv("MOO_AUTOSHOT_PATH");
+    if ((path != NULL) && (path[0] != '\0')) {
+        extern int hw_video_screenshot_png(const char *filename);
+        extern int hw_auto_shot_fired;
+        int rc = hw_video_screenshot_png(path);
+        if (rc == 0) {
+            hw_auto_shot_fired = 1;
+            log_message("AutoShot: wrote '%s'\n", path);
+            return true;
+        }
+        log_error("AutoShot: failed to write '%s' (rc=%d)\n", path, rc);
+    }
+    return false;
+}
+
+static bool new_game_jumpscreen_draw_race(struct new_game_data_s *d)
+{
+    int h, dy, ty = 0xa;
+    int16_t v18 = 0;
+    char const * const *s;
+    uint16_t itemi = 0;
+
+    d->pi = PLAYER_0;
+    d->selected = 0;
+    lbxpal_select(4, -1, 0);
+    lbxpal_build_colortables();
+    ui_draw_erase_buf();
+    lbxgfx_draw_frame(0, 0, d->gfx_custom, UI_SCREEN_W, ui_scale);
+    ui_draw_box1(0x5a, 0xa, 0x83, 0x2d, 0x9b, 0x9b, ui_scale);
+    hw_video_copy_back_to_page2();
+    new_game_draw_race_cb(d);
+
+    uiobj_table_clear();
+    lbxfont_select(5, 0xf, 0, 0);
+    h = lbxfont_get_height();
+    dy = lbxfont_get_gap_h() + h;
+    for (s = (char const * const *)d->str_tbl_2space_race; *s != NULL; ++s) {
+        ty += dy;
+        uiobj_add_ta(0xa, ty, 0x32, *s, true, &d->selected, itemi, 0, 0xf, MOO_KEY_UNKNOWN);
+        ++itemi;
+    }
+    lbxfont_select(lbxfont_get_current_fontnum(), lbxfont_get_current_fonta2(), lbxfont_get_current_fonta4(), 0);
+    uiobj_add_ta(0xa, 0xa, 0x32, game_str_ng_choose_race, false, &v18, 1, 0, 0, MOO_KEY_UNKNOWN);
+    ui_palette_set_n();
+    uiobj_finish_frame();
+    return new_game_jumpscreen_write_autoshot();
+}
+
 static void new_game_draw_banner_cb(void *vptr)
 {
     struct new_game_data_s *d = vptr;
@@ -184,6 +235,66 @@ static int16_t ui_new_game_choose_banner(struct game_new_options_s *newopts, str
     ui_sound_play_sfx_24();
     newopts->pdata[d->pi].banner = banner;
     return banner;
+}
+
+static bool new_game_jumpscreen_draw_banner(struct new_game_data_s *d)
+{
+    int h, dy, ty = 0xa;
+    int16_t v18 = 0;
+    char const * const *s;
+    uint16_t itemi = 0;
+
+    d->pi = PLAYER_0;
+    d->newopts->pdata[d->pi].race = RACE_HUMAN;
+    d->selected = 0;
+    d->frame = 0;
+    d->str_title = 0;
+    lbxpal_select(4, -1, 0);
+    lbxpal_build_colortables();
+    ui_draw_erase_buf();
+    lbxgfx_draw_frame(0, 0, d->gfx_custom, UI_SCREEN_W, ui_scale);
+    ui_draw_box1(0x5a, 0xa, 0x83, 0x2d, 0x9b, 0x9b, ui_scale);
+    hw_video_copy_back_to_page2();
+    new_game_draw_banner_cb(d);
+
+    uiobj_table_clear();
+    lbxfont_select(5, 0xf, 0, 0);
+    h = lbxfont_get_height();
+    dy = lbxfont_get_gap_h() + h;
+    for (s = (char const * const *)d->str_tbl_2space_banner; *s != NULL; ++s) {
+        ty += dy;
+        uiobj_add_ta(0xa, ty, 0x32, *s, true, &d->selected, itemi, 0, 0xf, MOO_KEY_UNKNOWN);
+        ++itemi;
+    }
+    lbxfont_select(lbxfont_get_current_fontnum(), lbxfont_get_current_fonta2(), lbxfont_get_current_fonta4(), 0);
+    uiobj_add_ta(0xa, 0xa, 0x32, game_str_ng_choose_banner, false, &v18, 1, 0, 0, MOO_KEY_UNKNOWN);
+    ui_palette_set_n();
+    uiobj_finish_frame();
+    return new_game_jumpscreen_write_autoshot();
+}
+
+static bool new_game_jumpscreen_draw_name(struct new_game_data_s *d, const char *title, char *buf, int width, int max_chars)
+{
+    d->fadein = false;
+    d->frame = 0;
+    d->pi = PLAYER_0;
+    d->have_human = true;
+    d->selected = BANNER_BLUE;
+    d->str_title = title;
+    d->newopts->pdata[d->pi].race = RACE_HUMAN;
+    d->newopts->pdata[d->pi].banner = BANNER_BLUE;
+    lbxpal_select(4, -1, 0);
+    ui_draw_erase_buf();
+    lbxgfx_draw_frame(0, 0, d->gfx_custom, UI_SCREEN_W, ui_scale);
+    hw_video_copy_back_to_page2();
+    uiobj_unset_callback();
+    uiobj_table_clear();
+    new_game_draw_banner_cb(d);
+    lbxfont_select(5, 0xf, 0xf, 0xf);
+    uiobj_add_textinput(0xf, 0x16, width, buf, max_chars, 0, false, false, tbl_cursor_color, MOO_KEY_UNKNOWN);
+    ui_palette_set_n();
+    uiobj_finish_frame();
+    return new_game_jumpscreen_write_autoshot();
 }
 
 static bool ui_new_game_pname(struct game_new_options_s *newopts, struct new_game_data_s *d, bool flag_generate)
@@ -608,5 +719,77 @@ bool ui_challenge_game(struct game_new_options_s *newopts) {
         d.newopts->pdata[5].race = RACE_HUMAN;
     }
 
+    return flag_ok;
+}
+
+bool ui_new_game_jumpscreen_race(void)
+{
+    struct game_new_options_s opts = GAME_NEW_OPTS_DEFAULT;
+    struct new_game_data_s d;
+    bool flag_ok = false;
+
+    d.newopts = &opts;
+    new_game_load_data(&d);
+    flag_ok = new_game_jumpscreen_draw_race(&d);
+    if (!flag_ok) {
+        flag_ok = ui_new_game_racebannernames(&opts, &d);
+    }
+    uiobj_unset_callback();
+    new_game_free_data(&d);
+    return flag_ok;
+}
+
+bool ui_new_game_jumpscreen_banner(void)
+{
+    struct game_new_options_s opts = GAME_NEW_OPTS_DEFAULT;
+    struct new_game_data_s d;
+    bool flag_ok = false;
+
+    d.newopts = &opts;
+    new_game_load_data(&d);
+    flag_ok = new_game_jumpscreen_draw_banner(&d);
+    if (!flag_ok) {
+        flag_ok = ui_new_game_racebannernames(&opts, &d);
+    }
+    uiobj_unset_callback();
+    new_game_free_data(&d);
+    return flag_ok;
+}
+
+bool ui_new_game_jumpscreen_empire_name(void)
+{
+    struct game_new_options_s opts = GAME_NEW_OPTS_DEFAULT;
+    struct new_game_data_s d;
+    char buf[32] = "EMPIRE";
+    bool flag_ok = false;
+
+    d.newopts = &opts;
+    new_game_load_data(&d);
+    lib_strcpy(opts.pdata[PLAYER_0].playername, buf, EMPEROR_NAME_LEN);
+    flag_ok = new_game_jumpscreen_draw_name(&d, game_str_ng_your_name, buf, 0x41, 0xb);
+    if (!flag_ok) {
+        flag_ok = ui_new_game_racebannernames(&opts, &d);
+    }
+    uiobj_unset_callback();
+    new_game_free_data(&d);
+    return flag_ok;
+}
+
+bool ui_new_game_jumpscreen_home_name(void)
+{
+    struct game_new_options_s opts = GAME_NEW_OPTS_DEFAULT;
+    struct new_game_data_s d;
+    char buf[32] = "SOL";
+    bool flag_ok = false;
+
+    d.newopts = &opts;
+    new_game_load_data(&d);
+    lib_strcpy(opts.pdata[PLAYER_0].homename, buf, PLANET_NAME_LEN);
+    flag_ok = new_game_jumpscreen_draw_name(&d, game_str_ng_home_name, buf, 0x32, PLANET_NAME_LEN);
+    if (!flag_ok) {
+        flag_ok = ui_new_game_racebannernames(&opts, &d);
+    }
+    uiobj_unset_callback();
+    new_game_free_data(&d);
     return flag_ok;
 }

@@ -1154,6 +1154,10 @@ int main_do(void)
 
         if (main_jumpscreen_spec != NULL
           && ((strcmp(main_jumpscreen_spec, "newgame") == 0)
+            || (strcmp(main_jumpscreen_spec, "newgame_race") == 0)
+            || (strcmp(main_jumpscreen_spec, "newgame_banner") == 0)
+            || (strcmp(main_jumpscreen_spec, "newgame_empire") == 0)
+            || (strcmp(main_jumpscreen_spec, "newgame_home") == 0)
             || (strncmp(main_jumpscreen_spec, "newgame:", 8) == 0))
         ) {
             extern int hw_auto_shot_armed; /* hwsdl2.c */

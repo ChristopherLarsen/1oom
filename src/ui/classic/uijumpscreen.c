@@ -31,6 +31,7 @@
 #include "game.h"
 #include "game_audience.h"
 #include "game_battle.h"
+#include "game_design.h"
 #include "game_election.h"
 #include "game_ground.h"
 #include "game_news.h"
@@ -46,6 +47,7 @@
 #include "uibasescrap.h"
 #include "uibattlepre.h"
 #include "uicaught.h"
+#include "uidesign.h"
 #include "uidialog.h"
 #include "uiempirereport.h"
 #include "uiempirestatus.h"
@@ -196,10 +198,91 @@ static int jump_newgame(struct game_s *g, const char *args)
     return 0;
 }
 
+static int jump_newgame_race(struct game_s *g, const char *args)
+{
+    (void)g;
+    (void)args;
+    ui_new_game_jumpscreen_race();
+    return 0;
+}
+
+static int jump_newgame_banner(struct game_s *g, const char *args)
+{
+    (void)g;
+    (void)args;
+    ui_new_game_jumpscreen_banner();
+    return 0;
+}
+
+static int jump_newgame_empire_name(struct game_s *g, const char *args)
+{
+    (void)g;
+    (void)args;
+    ui_new_game_jumpscreen_empire_name();
+    return 0;
+}
+
+static int jump_newgame_home_name(struct game_s *g, const char *args)
+{
+    (void)g;
+    (void)args;
+    ui_new_game_jumpscreen_home_name();
+    return 0;
+}
+
 static int jump_starmap(struct game_s *g, const char *args)
 {
     (void)args;
     ui_starmap_do(g, g->active_player);
+    return 0;
+}
+
+static int jump_design(struct game_s *g, const char *args)
+{
+    struct game_design_s gd;
+    (void)args;
+    game_design_prepare(g, &gd, g->active_player, NULL);
+    ui_design(g, &gd, g->active_player);
+    return 0;
+}
+
+static int jump_design_picker(struct game_s *g, const char *args)
+{
+    struct game_design_s gd;
+    int selmode = DESIGN_SLOT_COMP;
+    char slotbuf[32];
+    if (jumpscreen_arg_get(args, "slot", slotbuf, sizeof(slotbuf))) {
+        if (jumpscreen_strcasecmp(slotbuf, "comp") == 0 ||
+            jumpscreen_strcasecmp(slotbuf, "computer") == 0) {
+            selmode = DESIGN_SLOT_COMP;
+        } else if (jumpscreen_strcasecmp(slotbuf, "shield") == 0) {
+            selmode = DESIGN_SLOT_SHIELD;
+        } else if (jumpscreen_strcasecmp(slotbuf, "jammer") == 0 ||
+                   jumpscreen_strcasecmp(slotbuf, "ecm") == 0) {
+            selmode = DESIGN_SLOT_JAMMER;
+        } else if (jumpscreen_strcasecmp(slotbuf, "armor") == 0) {
+            selmode = DESIGN_SLOT_ARMOR;
+        } else if (jumpscreen_strcasecmp(slotbuf, "engine") == 0) {
+            selmode = DESIGN_SLOT_ENGINE;
+        } else if (jumpscreen_strcasecmp(slotbuf, "man") == 0 ||
+                   jumpscreen_strcasecmp(slotbuf, "maneuver") == 0) {
+            selmode = DESIGN_SLOT_MAN;
+        } else if (jumpscreen_strcasecmp(slotbuf, "weapon1") == 0 ||
+                   jumpscreen_strcasecmp(slotbuf, "weapon") == 0) {
+            selmode = DESIGN_SLOT_WEAPON1;
+        } else if (jumpscreen_strcasecmp(slotbuf, "weapon2") == 0) {
+            selmode = DESIGN_SLOT_WEAPON2;
+        } else if (jumpscreen_strcasecmp(slotbuf, "weapon3") == 0) {
+            selmode = DESIGN_SLOT_WEAPON3;
+        } else if (jumpscreen_strcasecmp(slotbuf, "weapon4") == 0) {
+            selmode = DESIGN_SLOT_WEAPON4;
+        } else {
+            log_error("Jumpscreen: unsupported design picker slot '%s'\n", slotbuf);
+            return 2;
+        }
+    }
+    game_design_prepare(g, &gd, g->active_player, NULL);
+    ui_design_jumpscreen_picker(g, &gd, g->active_player, selmode);
     return 0;
 }
 
@@ -915,7 +998,13 @@ static const struct ui_jumpscreen_entry_s ui_jumpscreen_table[] = {
     /* Tier 1: (g, pi) only — no extra args */
     { "empire_status",   jump_empire_status,   "Empire status / racial stats" },
     { "newgame",         jump_newgame,         "New game setup" },
+    { "newgame_race",    jump_newgame_race,    "New game race prompt" },
+    { "newgame_banner",  jump_newgame_banner,  "New game banner prompt" },
+    { "newgame_empire",  jump_newgame_empire_name, "New game empire-name prompt" },
+    { "newgame_home",    jump_newgame_home_name, "New game homeworld-name prompt" },
     { "starmap",         jump_starmap,         "Galactic starmap" },
+    { "design",          jump_design,          "Ship design" },
+    { "design_picker",   jump_design_picker,   "Ship design picker (args: slot=comp)" },
     { "empire_planets",  jump_empire_planets,  "Empire planets list" },
     { "fleet",           jump_fleet,           "Fleet view" },
     { "tech",            jump_tech,            "Research / tech tree" },
