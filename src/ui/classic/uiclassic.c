@@ -174,7 +174,6 @@ int ui_scale = 0;
 int ui_scale_hint = 0;
 int starmap_scale = 0;
 bool ui_extra_enabled = false;
-bool ui_fixbugs_enabled = false;
 bool ui_illogical_hotkey_fix = false;
 bool ui_load_opts_extra = false;
 bool ui_space_combat_autoresolve = false;
@@ -441,7 +440,6 @@ static int set_ui_icon(void)
 
 static void ui_fix_1_3a(void)
 {
-    ui_fixbugs_enabled = true;
     ui_sm_no_question_mark_cursor = true;
 }
 

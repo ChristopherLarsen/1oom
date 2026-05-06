@@ -115,20 +115,14 @@ void game_update_production(struct game_s *g)
             empiretechorbit_t *e = &(g->eto[owner]);
             int pop = p->pop;
             int v;
-            if (game_num_leaving_trans_fix) {
-                int rebels = p->rebels;
-                if (p->trans_num) {           /* see game_send_transport() */
-                    pop -= p->trans_num;
-                    SUBSAT0(rebels, p->trans_num / 2 + 1);
-                    SETMAX(pop, 1);
-                }
-                v = (pop - rebels) * game_planet_get_pop_oper_fact(g, p);
-                SETMAX(v, 0);
-            } else {
-                int popx = p->pop - p->rebels;
-                SETMAX(popx, 0);
-                v = popx * game_planet_get_pop_oper_fact(g, p);
+            int rebels = p->rebels;
+            if (p->trans_num) {           /* see game_send_transport() */
+                pop -= p->trans_num;
+                SUBSAT0(rebels, p->trans_num / 2 + 1);
+                SETMAX(pop, 1);
             }
+            v = (pop - rebels) * game_planet_get_pop_oper_fact(g, p);
+            SETMAX(v, 0);
             {
                 uint16_t factories = p->factories;
                 int extra;
@@ -261,10 +255,7 @@ void game_update_eco_on_waste(struct game_s *g, int player_i, bool force_adjust)
             } else if (check_locks && p->slider_lock[PLANET_SLIDER_SHIP] && p->slider_lock[PLANET_SLIDER_DEF] && p->slider_lock[PLANET_SLIDER_IND] && p->slider_lock[PLANET_SLIDER_TECH]) {
             } else if ((p->slider[PLANET_SLIDER_ECO] < v) || force_adjust) {
                 int16_t eco_diff = v - p->slider[PLANET_SLIDER_ECO];
-                int16_t sum = 100;
-                if (game_num_waste_adjust_fix) {
-                    sum = p->slider[PLANET_SLIDER_SHIP] + p->slider[PLANET_SLIDER_DEF] + p->slider[PLANET_SLIDER_IND] + p->slider[PLANET_SLIDER_TECH];
-                }
+                int16_t sum = p->slider[PLANET_SLIDER_SHIP] + p->slider[PLANET_SLIDER_DEF] + p->slider[PLANET_SLIDER_IND] + p->slider[PLANET_SLIDER_TECH];
                 if (check_locks) {
                     int16_t sum_locks = 0;
                     for (int si = 0; si < PLANET_SLIDER_NUM; ++si){
@@ -385,20 +376,13 @@ void game_update_within_range(struct game_s *g)
                     p->within_frange[pi] = 0;
                 }
                 BOOLVEC_SET(p->within_srange, pi, (mindist2 <= srange));
-                if (BOOLVEC_IS0(p->within_srange, pi) && ((srange2 > 0) || game_num_ship_scanner_fix)) {
+                if (BOOLVEC_IS0(p->within_srange, pi)) {
                     mindist1 = 10000;
                     for (int j = 0; (j < g->enroute_num) && (mindist1 > srange2); ++j) {
                         if (g->enroute[j].owner == pi) {
                             dist = util_math_dist_fast(g->enroute[j].x, g->enroute[j].y, p->x, p->y);
-                            if (game_num_ship_scanner_fix) {
-                                if (dist < mindist1) {
-                                    mindist1 = dist;
-                                }
-                            } else {
-                                dist = (dist + 9) / 10;
-                                if (dist < mindist1) {
-                                    dist = mindist1;
-                                }
+                            if (dist < mindist1) {
+                                mindist1 = dist;
                             }
                         }
                     }
@@ -699,9 +683,6 @@ int game_get_pop_growth_max(const struct game_s *g, const planet_t *p, int max_p
         }
     }
     retval = (v * p->pop + 5) / 100;
-    if (!game_num_pop_tenths_fix) {
-        retval += p->pop_tenths;
-    }
     if ((v > 0) && (retval < 1)) {
         retval = 1;
     }
@@ -816,15 +797,11 @@ int game_calc_eta_trans(const struct game_s *g, int speed, int x0, int y0, int x
 
 bool game_transport_dest_ok(const struct game_s *g, const planet_t *p, player_id_t pi)
 {
-    if (!game_num_trans_redir_fix) {
-        return (p->within_frange[pi] != 0); /* WASBUG MOO1 allows redirection almost anywhere */
-    } else {
-        return (p->within_frange[pi] == 1)
-            && BOOLVEC_IS1(p->explored, pi)
-            && (p->type >= g->eto[pi].have_colony_for)
-            && (p->owner != PLAYER_NONE)
-            ;
-    }
+    return (p->within_frange[pi] == 1)
+        && BOOLVEC_IS1(p->explored, pi)
+        && (p->type >= g->eto[pi].have_colony_for)
+        && (p->owner != PLAYER_NONE)
+        ;
 }
 
 bool game_reloc_dest_ok(const struct game_s *g, uint8_t planet_i, player_id_t pi)
@@ -887,18 +864,14 @@ void game_turn_soil_enrich(struct planet_s *p, int best_tform, bool advanced) {
         if ((p->max_pop1 / 10) % 5) {
             max_pop_increase += 5;
         }
-        if (game_num_soil_rounding_fix) {
-            max_pop_increase = ((p->max_pop1 + 9) / 10) * 5;
-        }
+        max_pop_increase = ((p->max_pop1 + 9) / 10) * 5;
     } else {
         max_pop_increase = (p->max_pop1 / 20) * 5;
         /* BUG? See above. */
         if ((p->max_pop1 / 20) % 5) {
             max_pop_increase += 5;
         }
-        if (game_num_soil_rounding_fix) {
-            max_pop_increase = ((p->max_pop1 + 19) / 20) * 5;
-        }
+        max_pop_increase = ((p->max_pop1 + 19) / 20) * 5;
     }
     SETMAX(max_pop_increase, 5);
     old_max_pop2 = p->max_pop2;

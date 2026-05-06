@@ -28,10 +28,10 @@ static void game_turn_bomb_damage(struct game_s *g, uint8_t pli, player_id_t att
     memset(tbl, 0, sizeof(tbl));
     for (int i = 0; i < ea->shipdesigns_num; ++i) {
         const shipdesign_t *sd = &(g->srd[attacker].design[i]);
-        if ((!game_num_orbital_comp_fix) || (ea->orbit[pli].ships[i] != 0)) { /* WASBUG bonus from non-existing ships */
+        if (ea->orbit[pli].ships[i] != 0) {
             SETMAX(maxcomp, sd->comp);
         }
-        for (int j = 0; j < (game_num_orbital_weap_4 ? WEAPON_SLOT_NUM : (WEAPON_SLOT_NUM - 1)); ++j) { /* WASBUG? last weapon not used */
+        for (int j = 0; j < WEAPON_SLOT_NUM; ++j) {
             weapon_t wpnt = sd->wpnt[j];
             uint32_t v;
             v = ea->orbit[pli].ships[i] * sd->wpnn[j];
@@ -75,7 +75,7 @@ static void game_turn_bomb_damage(struct game_s *g, uint8_t pli, player_id_t att
                         }
                     }
                 } else {
-                    if (game_num_orbital_torpedo == (w->misstype != 0)) { /* WASBUG damage halving for torpedo affected missiles instead */
+                    if (w->misstype == 0) {
                         dmgmax /= 2;
                     }
                     dmgmax *= w->nummiss;
@@ -186,7 +186,7 @@ void game_turn_bomb(struct game_s *g)
                     flag_do_bomb = game_ai->bomb(g, i, pli, pop_inbound);
                 }
                 /*d004*/
-                if (flag_do_bomb || !game_num_orbital_bio_fix) {
+                if (flag_do_bomb) {
                     if (biodmg) {
                         int v;
                         v = p->max_pop3 - biodmg;

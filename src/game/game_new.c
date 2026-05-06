@@ -1159,9 +1159,7 @@ int game_new(struct game_s *g, struct game_aux_s *gaux, struct game_new_options_
     /* DRG-RNG-TRACE-3: seed after research generation (heavy RNG consumer). */
     LOG_EVENT(0, "seed_checkpoint", "phase=post_research seed=%u", (unsigned)g->seed);
     game_generate_misc(g);
-    if (!game_num_update_on_load) {
-        game_generate_load(g);
-    }
+    game_generate_load(g);
     for (player_id_t i = PLAYER_0; i < g->players; ++i) {
         char *b;
         const char *str;

@@ -7,14 +7,8 @@
 /* -------------------------------------------------------------------------- */
 
 bool game_num_deterministic = false;
-bool game_num_ai_trans_range_fix = false;
-bool game_num_ai_4_colony_curse_fix = false;
-bool game_num_ai_first_tech_cost_fix = false;
 int game_num_bt_turn_max = 50;
-bool game_num_bt_wait_no_reload = false;
 bool game_num_bt_precap_tohit = false;
-bool game_num_bt_no_tohit_acc = false;
-bool game_num_bt_oracle_fix = false;
 int game_num_stargate_cost = 3000;
 int game_num_stargate_maint = 100;
 int game_num_weapon_list_max = 30;
@@ -39,38 +33,12 @@ bool game_num_accident_chk_factories = false;
 int game_num_council_years = 25;
 bool game_num_news_orion = false;
 bool game_num_aud_ask_break_nap = false;
-bool game_num_aud_bounty_give = false;
-bool game_num_aud_update_tech = false;
-bool game_num_update_on_load = true;
-bool game_num_newtech_adjust_fix = false;
 bool game_num_monster_rest_att = false;
-bool game_num_orbital_bio_fix = false;
 bool game_num_orbital_weap_any = false;
-bool game_num_orbital_weap_4 = false;
-bool game_num_orbital_torpedo = false;
-bool game_num_orbital_comp_fix = false;
-bool game_num_combat_trans_fix = false;
-bool game_num_stargate_redir_fix = false;
-bool game_num_trans_redir_fix = false;
-bool game_num_retreat_redir_fix = false;
-bool game_num_first_tech_rp_fix = false;
-bool game_num_waste_calc_fix = false;
-bool game_num_waste_adjust_fix = false;
 bool game_num_slider_respects_locks = false;
-bool game_num_pop_tenths_fix = false;
-bool game_num_factory_cost_fix = false;
-bool game_num_doom_stack_fix = false;
 uint8_t game_num_eco_slider_slack = 7;
 bool game_num_reset_tform_to_max = true;
-bool game_num_soil_rounding_fix = false;
-bool game_num_leaving_trans_fix = false;
-bool game_num_hidden_child_labor_fix = false;
 bool game_num_extended_reloc_range = false;
-bool game_num_colonized_factories_fix = false;
-bool game_num_cond_switch_to_ind_fix = false;
-bool game_num_slider_eco_done_fix = false;
-bool game_num_ship_scanner_fix = false;
-bool game_num_ai_fleet_cheating_fix = false;
 
 uint8_t game_num_tbl_hull_w[4] = { 1, 5, 25, 125 };
 

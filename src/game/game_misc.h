@@ -41,13 +41,14 @@ extern void game_ship_replace_everywhere(struct game_s *g, player_id_t owner, ui
 
 static inline int game_planet_get_pop_oper_fact(const struct game_s *g, const struct planet_s *p)
 {
-    return game_num_factory_cost_fix ? p->pop_oper_fact : g->eto[p->owner].colonist_oper_factories;
+    (void)g;
+    return p->pop_oper_fact;
 }
 
 static inline int game_planet_get_fact_adj_cost(const struct game_s *g, const struct planet_s *p)
 {
     const struct empiretechorbit_s *e = &g->eto[p->owner];
-    return (game_num_factory_cost_fix && (e->race != RACE_MEKLAR)) ? ((e->factory_cost * p->pop_oper_fact) / 2) : e->factory_adj_cost;
+    return (e->race != RACE_MEKLAR) ? ((e->factory_cost * p->pop_oper_fact) / 2) : e->factory_adj_cost;
 }
 
 #endif

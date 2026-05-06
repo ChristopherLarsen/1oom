@@ -928,7 +928,7 @@ void game_tech_research(struct game_s *g)
                     }
                 }
             } else {
-                if ((cost != 0) || (!game_num_first_tech_rp_fix)) { /* WASBUG? 1 RP for first tech rounded down to 0 */
+                if (cost != 0) {
                     td->investment[field] = (invest * 9) / 10;
                 }
             }

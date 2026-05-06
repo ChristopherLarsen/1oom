@@ -219,23 +219,12 @@ static void game_turn_send_transport(struct game_s *g)
 
 static int game_turn_build_eco_sub1(int fact, int colonist_oper_fact, int pop1, int waste, int max_pop2)
 {
-    if (game_num_waste_calc_fix) {
-        /* WASBUG
-           MOO1 adds waste twice using two separate pieces of code.
-           The first time (see above) is as described in OSG.
-           The second time (see below, from game_turn_build_eco_sub1) has several issues:
-           - p->pop * e->colonist_oper_factories * e->colonist_oper_factories / 10 makes no sense
-           - since p->waste is not limited at this point, the value added can be negative, leading to Silicoid planets with 0 waste
-           - the cost of eco restoration is already calculated; as the slider is typically set to Clean (ecorestore <= ecoprod) the point is mostly moot
-           Speculation: Someone added the above working code and forgot to remove this broken code.
-        */
-        return 0;
-    }
-    int v;
-    v = pop1 * colonist_oper_fact;
-    SETMIN(fact, v);
-    v = (fact * colonist_oper_fact) / 10;
-    return ((100 - ((waste * 100) / max_pop2)) * v) / 100;
+    (void)fact;
+    (void)colonist_oper_fact;
+    (void)pop1;
+    (void)waste;
+    (void)max_pop2;
+    return 0;
 }
 
 static inline void game_add_planet_to_eco_finished(struct game_s *g, uint8_t pli, player_id_t owner)
@@ -789,25 +778,23 @@ static void game_turn_build_ind(struct game_s *g)
             v = e->colonist_oper_factories - p->pop_oper_fact - bonus;
             if (v > 0) {
                 v = v * (e->factory_cost / 2);
-                if (game_num_factory_cost_fix) {
-                    if (e->race != RACE_MEKLAR) {
-                        v = (e->factory_cost * p->factories) / 2;
-                    } else {
-                        v = 0;
-                    }
+                if (e->race != RACE_MEKLAR) {
+                    v = (e->factory_cost * p->factories) / 2;
+                } else {
+                    v = 0;
                 }
             } else {
                 v = 0;
             }
             if ((prod / cost + fact) > (p->pop * p->pop_oper_fact)) {
-                if (game_num_factory_cost_fix && (fact < (p->pop * p->pop_oper_fact))) {
+                if (fact < (p->pop * p->pop_oper_fact)) {
                     num = p->pop * p->pop_oper_fact - fact;
                     fact = p->pop * p->pop_oper_fact;
                     prod -= num * cost;
                 }
                 p->bc_to_refit += prod;
                 if (p->bc_to_refit >= v) {
-                    if (game_num_factory_cost_fix && (e->race != RACE_MEKLAR)) {
+                    if (e->race != RACE_MEKLAR) {
                         ++p->pop_oper_fact;
                         SETMIN(p->pop_oper_fact, e->colonist_oper_factories);
                     } else {
@@ -830,7 +817,7 @@ static void game_turn_build_ind(struct game_s *g)
             } else {
                 v = 0;
             }
-            if (game_num_factory_cost_fix && (p->pop_oper_fact < e->colonist_oper_factories)) {
+            if (p->pop_oper_fact < e->colonist_oper_factories) {
                 p->bc_to_refit += (v * cost) / 2;
             } else {
                 e->reserve_bc += (v * cost) / 2;
@@ -1108,7 +1095,6 @@ static void game_turn_explore(struct game_s *g)
                         p->owner = i;
                         p->pop = 2;
                         if (1
-                          && game_num_colonized_factories_fix
                           && (p->prev_owner != PLAYER_NONE)
                           && (p->prev_owner != i)) {
                             if (p->factories != 0) {
@@ -1298,21 +1284,11 @@ static void game_turn_transport(struct game_s *g)
             if (g->eto[owner].have_combat_transporter) {
                 int n;
                 n = pop2 - pop3;
-                if (game_num_combat_trans_fix) {    /* do as OSG says: 50% chance, 25% if interdictor */
-                    int c;
-                    c = g->eto[p->owner].have_sub_space_int ? 4 : 2;
-                    for (int j = 0; j < n; ++j) {
-                        if (!rnd_0_nm1(c, &g->seed)) {
-                            ++pop3;
-                        }
-                    }
-                } else if (g->eto[p->owner].have_sub_space_int) {   /* WASBUG transporters only work when planet owner has interdictor */
-                    for (int j = 0; j < n; ++j) {
-                        if (!rnd_0_nm1(4, &g->seed)) {
-                            ++pop3;
-                        } else if (!rnd_0_nm1(2, &g->seed)) {
-                            ++pop3;
-                        }
+                int c;
+                c = g->eto[p->owner].have_sub_space_int ? 4 : 2;
+                for (int j = 0; j < n; ++j) {
+                    if (!rnd_0_nm1(c, &g->seed)) {
+                        ++pop3;
                     }
                 }
             }
@@ -1607,15 +1583,10 @@ static void game_turn_finished_slider(struct game_s *g)
             continue;
         }
         e = &(g->eto[pi]);
-        cond_build_ind = (p->factories < (p->pop * e->colonist_oper_factories));
-        if (game_num_cond_switch_to_ind_fix) {
-            cond_build_ind = (p->factories < (p->max_pop3 * e->colonist_oper_factories));
-        }
-        if (game_num_factory_cost_fix) {
-            cond_build_ind |= (p->pop_oper_fact < e->colonist_oper_factories);
-        }
+        cond_build_ind = (p->factories < (p->max_pop3 * e->colonist_oper_factories));
+        cond_build_ind |= (p->pop_oper_fact < e->colonist_oper_factories);
         if (BOOLVEC_IS1(p->finished, FINISHED_SOILATMOS)
-          && !(game_num_slider_eco_done_fix && game_planet_can_terraform(g, p, p->owner, true))) {
+          && !(game_planet_can_terraform(g, p, p->owner, true))) {
             game_turn_finished_disable_slider(g, p, PLANET_SLIDER_ECO, cond_build_ind);
             game_add_planet_to_build_finished(g, pli, pi, FINISHED_SOILATMOS);
         }
@@ -1765,9 +1736,6 @@ struct game_end_s game_turn_process(struct game_s *g)
     game_update_have_reserve_fuel(g);
     game_turn_update_trade(g);
     game_spy_build(g);
-    if (!game_num_hidden_child_labor_fix) {
-        game_update_production(g);
-    }
     game_turn_diplo_adjust(g);
     game_turn_build_def(g);
     game_turn_build_ship(g);

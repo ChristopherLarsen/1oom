@@ -361,16 +361,7 @@ void ui_tech(struct game_s *g, player_id_t active_player)
         }
         if (oi == oi_equals || oi == oi_hash) {
             ui_sound_play_sfx_24();
-            if (ui_fixbugs_enabled) {
-                game_equalize_slider_group(t->slider, TECH_FIELD_NUM, t->slider_lock);
-            } else {
-                t->slider[0] = 16;
-                t->slider[1] = 17;
-                t->slider[2] = 17;
-                t->slider[3] = 16;
-                t->slider[4] = 17;
-                t->slider[5] = 17;
-            }
+            game_equalize_slider_group(t->slider, TECH_FIELD_NUM, t->slider_lock);
         }
         if ((d.pos + TECH_ON_SCREEN) >= d.num) {
             d.pos = d.num - TECH_ON_SCREEN;

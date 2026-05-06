@@ -100,14 +100,7 @@ static void game_ai_classic_new_game_tech(struct game_s *g)
             do {
                 tech = rl[rnd_0_nm1(3, &g->seed)];
             } while (tech == 0);
-            if (game_num_ai_first_tech_cost_fix) {
-                game_tech_start_next(g, pli, field, tech);
-            } else {
-                empiretechorbit_t *e;
-                e = &g->eto[pli];
-                e->tech.project[field] = tech;
-                e->tech.cost[field] = tech * tech * 50;
-            }
+            game_tech_start_next(g, pli, field, tech);
         }
         /* DRG-RNG-TRACE-3 2026-04-29: per-player seed after new_game_tech. */
         LOG_EVENT(0, "new_game_tech", "pi=%i seed_out=%u", (int)pli, (unsigned)g->seed);
@@ -462,9 +455,6 @@ static bool game_ai_classic_turn_p1_have_colony_ship(struct game_s *g, struct ai
         return false;
     }
     shipn = srd->shipcount[shipi];
-    if (!game_num_ai_4_colony_curse_fix && (shipn > 3)) {
-        return false;
-    }
     planeti = ait->tbl_front_planet[rnd_0_nm1(ait->num_fronts, &g->seed)];
     if (planeti == PLANET_NONE) { /* never true? */
         return false;
@@ -986,7 +976,7 @@ static void game_ai_classic_turn_p1_trans_en(struct game_s *g, struct ai_turn_p1
           && (IS_AI(g, p->owner) || (g->evn.ceasefire[p->owner][pi] <= 0))
           && (e->treaty[p->owner] != TREATY_ALLIANCE)
           && (e->have_colony_for <= p->type)
-          && ((!game_num_ai_trans_range_fix) || (p->within_frange[pi] == 1))
+          && (p->within_frange[pi] == 1)
         ) {
             const shipcount_t *s;
             s = &(e->orbit[i].ships[0]);
@@ -2054,11 +2044,7 @@ static void game_ai_classic_turn_p3(struct game_s *g)
                   && (p->shield >= e->have_planet_shield)
                 ) {
                     uint16_t v;
-                    if (game_num_ai_fleet_cheating_fix) {
-                        v = sl[PLANET_SLIDER_DEF];
-                    } else {
-                        v = sl[PLANET_SLIDER_SHIP];   /* BUG creates very large fleets */
-                    }
+                    v = sl[PLANET_SLIDER_DEF];
                     sl[PLANET_SLIDER_SHIP] += v;
                     sl[PLANET_SLIDER_DEF] = 0;
                 }
@@ -2251,14 +2237,7 @@ static bool game_ai_classic_battle_ai_ai_resolve_do(struct battle_s *bt)
                 }
             } else {
                 for (int i = 0; i < NUM_SHIPDESIGNS; ++i) {
-                    if (game_num_doom_stack_fix) {
-                        bt->s[s].tbl_ships[i] = (((uint64_t)bt->s[s].tbl_ships[i]) * ws2) / ws;
-                    } else {
-                        /* WASBUG MOO1 uses 32bit math which results in negative overflows with large ws2,
-                           giving negative ship counts which get limited to 32000 later.
-                        */
-                        bt->s[s].tbl_ships[i] = (bt->s[s].tbl_ships[i] * ws2) / ws;
-                    }
+                    bt->s[s].tbl_ships[i] = (((uint64_t)bt->s[s].tbl_ships[i]) * ws2) / ws;
                 }
             }
         }

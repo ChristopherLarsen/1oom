@@ -154,14 +154,8 @@ static const struct numtbl_s {
     DEFNUMITEMLSTBL(st_hull_power, tbl_shiptech_hull, power, NUMTYPE_U16, 0, 0xffff),
     DEFNUMITEMLSTBL(st_hull_defense, tbl_shiptech_hull, defense, NUMTYPE_S16, -0x8000, 0x7fff),
     DEFNUMITEML(deterministic, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(ai_trans_range_fix, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(ai_4_colony_curse_fix, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(ai_first_tech_cost_fix, NUMTYPE_BOOL, 0, 1),
     DEFNUMITEML(bt_turn_max, NUMTYPE_S, 1, 0xffff),
-    DEFNUMITEML(bt_wait_no_reload, NUMTYPE_BOOL, 0, 1),
     DEFNUMITEML(bt_precap_tohit, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(bt_no_tohit_acc, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(bt_oracle_fix, NUMTYPE_BOOL, 0, 1),
     DEFNUMITEML(stargate_cost, NUMTYPE_S, 1, 0xffff),
     DEFNUMITEML(stargate_maint, NUMTYPE_S, 1, 0xffff),
     DEFNUMITEML(weapon_list_max, NUMTYPE_S, 0, WEAPON_NUM),
@@ -186,38 +180,12 @@ static const struct numtbl_s {
     DEFNUMITEML(council_years, NUMTYPE_S, 0, 0x7fff),
     DEFNUMITEML(news_orion, NUMTYPE_BOOL, 0, 1),
     DEFNUMITEML(aud_ask_break_nap, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(aud_bounty_give, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(aud_update_tech, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(update_on_load, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(newtech_adjust_fix, NUMTYPE_BOOL, 0, 1),
     DEFNUMITEML(monster_rest_att, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(orbital_bio_fix, NUMTYPE_BOOL, 0, 1),
     DEFNUMITEML(orbital_weap_any, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(orbital_weap_4, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(orbital_torpedo, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(orbital_comp_fix, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(combat_trans_fix, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(stargate_redir_fix, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(trans_redir_fix, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(retreat_redir_fix, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(first_tech_rp_fix, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(waste_calc_fix, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(waste_adjust_fix, NUMTYPE_BOOL, 0, 1),
     DEFNUMITEML(slider_respects_locks, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(pop_tenths_fix, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(factory_cost_fix, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(doom_stack_fix, NUMTYPE_BOOL, 0, 1),
     DEFNUMITEML(eco_slider_slack, NUMTYPE_U8, 0, 0xff),
     DEFNUMITEML(reset_tform_to_max, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(soil_rounding_fix, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(leaving_trans_fix, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(hidden_child_labor_fix, NUMTYPE_BOOL, 0, 1),
     DEFNUMITEML(extended_reloc_range, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(colonized_factories_fix, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(cond_switch_to_ind_fix, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(slider_eco_done_fix, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(ship_scanner_fix, NUMTYPE_BOOL, 0, 1),
-    DEFNUMITEML(ai_fleet_cheating_fix, NUMTYPE_BOOL, 0, 1),
     DEFNUMITEMLTBLL(tbl_hull_w, NUMTYPE_U8, 0, 0xff),
     DEFNUMITEMLTBLL(tech_costmuld, NUMTYPE_U8, 0, 0xff),
     DEFNUMITEMLTBLL(tech_costmula, NUMTYPE_U8, 0, 0xff),
@@ -458,31 +426,17 @@ static const struct numtbl_s *find_match(const char *numid, int i, int num)
 
 /* -------------------------------------------------------------------------- */
 
-bool game_opt_fix_bugs = false;
 bool game_opt_fix_starting_ships = false;
 
-void game_num_fix_bugs(void)
+void game_num_apply_canonical_bugfixes(void)
 {
-    game_num_ng_tech[RACE_SILICOID][TECH_FIELD_PLANETOLOGY][24] = 1;
-    game_num_ng_tech[RACE_SILICOID][TECH_FIELD_PLANETOLOGY][30] = 1;
-    game_num_accident_chk_factories = true;
-    game_num_weapon_list_max = 64;
-    game_num_aud_bounty_give = true;
-    game_num_aud_update_tech = true;
-    game_num_update_on_load = false;
-    game_num_combat_trans_fix = true;
-    game_num_eco_slider_slack = 0;
-    game_num_reset_tform_to_max = false;
+    /* Listed bugfixes are canonical and no longer optional. */
 }
 
-void game_num_fix_bugs_1_3a(void)
+void game_num_apply_1_3a_rules(void)
 {
-    game_num_ai_4_colony_curse_fix = true;
     game_num_max_factories = 2700;
-    game_num_bt_oracle_fix = true;
     game_num_orbital_weap_any = true;
-    game_num_orbital_torpedo = true;
-    game_num_ship_scanner_fix = true;
 
     tbl_monster[MONSTER_GUARDIAN][3].special[1] = 16;
     tbl_monster[MONSTER_GUARDIAN][4].special[1] = 26;

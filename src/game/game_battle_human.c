@@ -636,7 +636,7 @@ static void game_battle_reset_specials(struct battle_s *bt)
             b->missile = 1;
         }
     }
-    if (game_num_bt_wait_no_reload && b->can_retaliate) {   /* WASBUG MOO1 reloads specials on Wait */
+    if (b->can_retaliate) {
         return;
     }
     b->can_retaliate = true;
@@ -1670,10 +1670,6 @@ bool game_battle_attack(struct battle_s *bt, int attacker_i, int target_i, bool 
             }
             range += w->range;
             if ((range >= dist) && ((!w->is_bomb) || (target_i == 0/*planet*/))) {
-                if (!game_num_bt_no_tohit_acc) { /* BUG? each weapon reduces miss chance */
-                    miss_chance_beam -= w->extraacc * 10;
-                    miss_chance_missile -= w->extraacc * 10;
-                }
                 if ((damagerange != 0) || w->is_bio) {
                     /*5755a*/
                     int absorbdiv;
@@ -1732,9 +1728,7 @@ bool game_battle_attack(struct battle_s *bt, int attacker_i, int target_i, bool 
                             --b->wpn[i].numshots;
                         }
                         miss_chance = w->is_bomb ? miss_chance_missile : miss_chance_beam;
-                        if (game_num_bt_no_tohit_acc) {
-                            miss_chance -= w->extraacc * 10;
-                        }
+                        miss_chance -= w->extraacc * 10;
                         if (game_num_bt_precap_tohit) {
                             SETMIN(miss_chance, 95);
                         }
@@ -2090,7 +2084,7 @@ void game_battle_area_setup(struct battle_s *bt)
 int game_battle_get_absorbdiv(const struct battle_item_s *b, const struct shiptech_weap_s *w, bool force_oracle_check)
 {
     int v = 1;
-    if ((force_oracle_check || game_num_bt_oracle_fix) && (b->sbmask & (1 << SHIP_SPECIAL_BOOL_ORACLE))) {
+    if ((force_oracle_check || true) && (b->sbmask & (1 << SHIP_SPECIAL_BOOL_ORACLE))) {
         /* XXX we do not check if w is a beam weapon as this is called by buggy-like-v1.3 AI code for missiles */
         v = 2;
     }

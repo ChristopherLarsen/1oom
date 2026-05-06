@@ -480,12 +480,6 @@ static void game_start(struct game_s *g)
     game_ai = game_ais[g->ai_id];
     game_update_production(g);
     game_update_tech_util(g);
-    if (game_num_update_on_load) {
-        for (int i = 0; i < g->players; ++i) {
-            game_update_eco_on_waste(g, i, false);
-            game_update_seen_by_orbit(g, i);
-        }
-    }
     game_update_within_range(g);
     game_update_visibility(g);
     game_update_have_reserve_fuel(g);
@@ -552,13 +546,11 @@ static void game_save_custom_opts_to_cfg(struct game_new_options_s *go)
 
 void game_apply_rules(void)
 {
-    if (game_opt_fix_bugs) {
-        game_num_fix_bugs();
-    }
+    game_num_apply_canonical_bugfixes();
     if (game_opt_fix_starting_ships) {
         game_num_fix_starting_ships();
     }
-    game_num_fix_bugs_1_3a();
+    game_num_apply_1_3a_rules();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1027,32 +1019,9 @@ const struct cfg_items_s game_cfg_items[] = {
     CFG_ITEM_INT("rules_tech_cost_mul", &game_num_tech_costmul, NULL),
     CFG_ITEM_INT("rules_tech_cost_mul_human", &game_num_tech_costmuld2, NULL),
     CFG_ITEM_INT("rules_tech_cost_mul_ai", &game_num_tech_costmula2, NULL),
-    CFG_ITEM_BOOL("rules_ai_transport_range_fix", &game_num_ai_trans_range_fix),
-    CFG_ITEM_BOOL("rules_ai_first_tech_cost_fix", &game_num_ai_first_tech_cost_fix),
-    CFG_ITEM_BOOL("rules_doom_stack_fix", &game_num_doom_stack_fix),
-    CFG_ITEM_BOOL("rules_bt_no_tohit_acc", &game_num_bt_no_tohit_acc),
     CFG_ITEM_BOOL("rules_bt_precap_tohit", &game_num_bt_precap_tohit),
-    CFG_ITEM_BOOL("rules_bt_wait_no_reload", &game_num_bt_wait_no_reload),
     CFG_ITEM_BOOL("rules_deterministic_rng", &game_num_deterministic),
-    CFG_ITEM_BOOL("rules_hidden_child_labor_fix", &game_num_hidden_child_labor_fix),
-    CFG_ITEM_BOOL("rules_leaving_trans_fix", &game_num_leaving_trans_fix),
     CFG_ITEM_BOOL("rules_monster_rest_attack", &game_num_monster_rest_att),
-    CFG_ITEM_BOOL("rules_factory_cost_fix", &game_num_factory_cost_fix),
-    CFG_ITEM_BOOL("rules_colonized_factories_fix", &game_num_colonized_factories_fix),
-    CFG_ITEM_BOOL("rules_newtech_adjust_fix", &game_num_newtech_adjust_fix),
-    CFG_ITEM_BOOL("rules_slider_eco_done_fix", &game_num_slider_eco_done_fix),
-    CFG_ITEM_BOOL("rules_cond_switch_to_ind_fix", &game_num_cond_switch_to_ind_fix),
-    CFG_ITEM_BOOL("rules_waste_adjust_fix", &game_num_waste_adjust_fix),
-    CFG_ITEM_BOOL("rules_orbital_bio_fix", &game_num_orbital_bio_fix),
-    CFG_ITEM_BOOL("rules_orbital_weap_4", &game_num_orbital_weap_4),
-    CFG_ITEM_BOOL("rules_orbital_comp_fix", &game_num_orbital_comp_fix),
-    CFG_ITEM_BOOL("rules_retreat_redir_fix", &game_num_retreat_redir_fix),
-    CFG_ITEM_BOOL("rules_ship_stargate_redir_fix", &game_num_stargate_redir_fix),
-    CFG_ITEM_BOOL("rules_ship_trans_redir_fix", &game_num_trans_redir_fix),
-    CFG_ITEM_BOOL("rules_soil_rounding_fix", &game_num_soil_rounding_fix),
-    CFG_ITEM_BOOL("rules_waste_calc_fix", &game_num_waste_calc_fix),
-    CFG_ITEM_BOOL("rules_ai_fleet_cheating_fix", &game_num_ai_fleet_cheating_fix),
-    CFG_ITEM_BOOL("rules_fix_bugs", &game_opt_fix_bugs),
     CFG_ITEM_BOOL("rules_fix_starting_ships", &game_opt_fix_starting_ships),
     CFG_ITEM_END
 };

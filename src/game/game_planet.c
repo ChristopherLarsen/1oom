@@ -145,7 +145,7 @@ void game_planet_adjust_percent(struct game_s *g, player_id_t owner, planet_slid
                 if (si != PLANET_SLIDER_IND) {
                     sum += p->slider[PLANET_SLIDER_IND];
                 }
-                if (game_num_newtech_adjust_fix && (si != PLANET_SLIDER_ECO)) {
+                if (si != PLANET_SLIDER_ECO) {
                     int eco = p->slider[PLANET_SLIDER_ECO] - game_planet_get_waste_percent(NULL, g, p, false);
                     SETMAX(eco, 0);
                     sum += eco;
@@ -355,10 +355,8 @@ int game_planet_get_slider_text(const struct game_s *g, const planet_t *p, plane
                         if (p->pop_oper_fact < e->colonist_oper_factories) {
                             if (e->race != RACE_MEKLAR) {
                                 str = game_str_sm_refit;
-                                if (game_num_factory_cost_fix) {
-                                    /* FIXME: Doesn't always match the result */
-                                    str = game_str_sm_irc[p->pop_oper_fact - 1];
-                                }
+                                /* FIXME: Doesn't always match the result */
+                                str = game_str_sm_irc[p->pop_oper_fact - 1];
                             } else {
                                 struct strbuild_s strbuild = strbuild_init(buf, bufsize);
                                 tenths_2str(&strbuild, v20);
@@ -474,16 +472,10 @@ int game_planet_get_slider_text_eco(const struct game_s *g, const planet_t *p, b
                 } else {
                     if (((p->pop - p->trans_num) * 10 + growth) > (max_pop * 10)) {
                         growth = (max_pop - (p->pop - p->trans_num)) * 10;
-                        if (!game_num_pop_tenths_fix) {
-                            growth += p->pop_tenths;
-                        }
                     }
                     growth2 = game_get_pop_growth_for_eco(g, p, vthis) + growth;
                     if (((p->pop - p->trans_num) * 10 + growth2) >= (max_pop * 10)) {
                         growth2 = (max_pop - (p->pop - p->trans_num)) * 10;
-                        if (!game_num_pop_tenths_fix) {
-                            growth2 += p->pop_tenths;
-                        }
                         max = (growth != growth2);
                     }
                     growth = growth2 - growth;

@@ -400,8 +400,8 @@ void ui_starmap_draw_starmap(struct starmap_data_s *d)
         y0 = (-y / 4) + 6;
         x1 = ((-x + 1) / 2) + 6;
         y1 = ((-y + 1) / 2) + 6;
-        gfx1 = ui_fixbugs_enabled ? ui_data.gfx.starmap.starbak2 : ui_data.gfx.starmap.starback;
-        gfx2 = ui_fixbugs_enabled ? ui_data.gfx.starmap.starback : ui_data.gfx.starmap.starbak2;
+        gfx1 = ui_data.gfx.starmap.starbak2;
+        gfx2 = ui_data.gfx.starmap.starback;
         lx = 222 * ui_scale - 1;
         ly = 178 * ui_scale - 1;
         for (int yb = y0; yb < ly; yb += 200) {

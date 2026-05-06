@@ -281,11 +281,9 @@ static void game_audience_ai_pays_bounty(struct audience_s *au)
     empiretechorbit_t *eh = &(g->eto[ph]);
 
     ui_audience_show2(au);
-    if (game_num_aud_bounty_give) {  /* WASBUG MOO1 never gives the bounty */
-        eh->reserve_bc += eh->attack_gift_bc[pa];
-        if (eh->attack_gift_tech[pa] != 0) {
-            game_tech_get_new(g, ph, eh->attack_gift_field[pa], eh->attack_gift_tech[pa], TECHSOURCE_TRADE, pa, PLAYER_NONE, false);
-        }
+    eh->reserve_bc += eh->attack_gift_bc[pa];
+    if (eh->attack_gift_tech[pa] != 0) {
+        game_tech_get_new(g, ph, eh->attack_gift_field[pa], eh->attack_gift_tech[pa], TECHSOURCE_TRADE, pa, PLAYER_NONE, false);
     }
 }
 
@@ -1062,9 +1060,7 @@ void game_audience(struct game_s *g, player_id_t ph, player_id_t pa)
     if (au->dtype == 32) {
         game_diplo_break_treaty(g, pa, ph);
     }
-    if (game_num_aud_update_tech) {
-        game_update_tech_util(g);
-        game_update_within_range(g);
-        game_update_visibility(g);
-    }
+    game_update_tech_util(g);
+    game_update_within_range(g);
+    game_update_visibility(g);
 }
