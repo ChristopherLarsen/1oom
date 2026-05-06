@@ -167,10 +167,6 @@ For all game UIs:
                          8 is undo
                          2300 and over are yearly saves
     -continue            Continue game
-    -undo                Enable undo saves
-    -noundo              Disable undo saves
-    -yearsave            Enable yearly saves
-    -noyearsave          Disable yearly saves
     -skipintro           Skip intro
     -noskipintro         Do not skip intro
     -nextturn            Go directly to next turn (for reproducing bugs)
@@ -180,13 +176,10 @@ For all game UIs:
 
 For classic game UI:
     -uiscale SCALE       UI scaling factor
-    -uiextra             Enable UI extras
-    -nouiextra           Disable UI extras
     -mwislider           Invert mouse wheel for sliders
     -nomwislider         Do not invert mouse wheel for sliders
     -mwicounter          Invert mouse wheel for counters
     -nomwicounter        Do not invert mouse wheel for counters
-    -uismscroll SPEED    Starmap scroll speed (1..10, 0 = instant)
 
 3.1. -new
 ----------

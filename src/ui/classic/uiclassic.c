@@ -37,18 +37,8 @@ static int ui_icon = 146/*guardian*/;
 
 void ui_extra_toggle_preset(bool enabled)
 {
-    ui_extra_enabled = enabled;
-    ui_load_opts_extra = enabled;
     game_opt_skip_intro_always = enabled;
     ui_space_combat_autoresolve = enabled;
-    ui_sm_ships_enabled = enabled;
-    ui_sm_expanded_scroll = enabled;
-    ui_sm_explicit_cursor_context = enabled;
-    ui_illogical_hotkey_fix = enabled;
-    ui_sm_smoother_scrolling = enabled;
-    ui_kbd_cursor_keys_fix = enabled;
-    ui_mouse_lmb_fix = enabled;
-    ui_mouse_warp_disabled = enabled;
 }
 
 static bool check_ui_scale(void *var)
@@ -73,43 +63,17 @@ static bool check_ui_icon(void *var)
     }
 }
 
-static bool check_ui_sm_scroll_speed(void *var)
-{
-    int v = (int)(intptr_t)var;
-    if ((v >= 0) && (v <= UI_SCROLL_SPEED_MAX)) {
-        return true;
-    } else {
-        log_error("invalid ui_sm_scroll_speed %i, must be 0 <= N <= %i\n", v, UI_SCROLL_SPEED_MAX);
-        return false;
-    }
-}
-
 const struct cfg_items_s ui_cfg_items[] = {
     CFG_ITEM_INT("uiscale", &ui_scale_hint, check_ui_scale),
-    CFG_ITEM_BOOL("uiextra", &ui_extra_enabled),
     CFG_ITEM_BOOL("ui_delay_enabled", &ui_delay_enabled),
-    CFG_ITEM_BOOL("illogical_hotkey_fix", &ui_illogical_hotkey_fix),
-    CFG_ITEM_BOOL("load_opts_extra", &ui_load_opts_extra),
     CFG_ITEM_BOOL("space_combat_autoresolve", &ui_space_combat_autoresolve),
-    CFG_ITEM_BOOL("ui_sm_ships_enabled", &ui_sm_ships_enabled),
-    CFG_ITEM_BOOL("sm_expanded_scroll", &ui_sm_expanded_scroll),
-    CFG_ITEM_BOOL("sm_explicit_cursor_context", &ui_sm_explicit_cursor_context),
-    CFG_ITEM_BOOL("mouse_lmb_fix", &ui_mouse_lmb_fix),
-    CFG_ITEM_BOOL("mouse_warp_disabled", &ui_mouse_warp_disabled),
     CFG_ITEM_BOOL("copy_protection_disabled", &ui_copyprotection_disabled),
-    CFG_ITEM_BOOL("sm_mouseover_focus", &ui_sm_mouseover_focus),
-    CFG_ITEM_BOOL("sm_smoother_scrolling", &ui_sm_smoother_scrolling),
-    CFG_ITEM_BOOL("sm_mouse_scroll", &ui_sm_mouse_scroll),
-    CFG_ITEM_BOOL("sm_uhjk_scroll", &ui_sm_uhjk_scroll),
-    CFG_ITEM_BOOL("kbd_cursor_keys_fix", &ui_kbd_cursor_keys_fix),
     CFG_ITEM_COMMENT("0..146"),
     CFG_ITEM_INT("uiicon", &ui_icon, check_ui_icon),
     CFG_ITEM_COMMENT("Invert mouse wheel for sliders"),
     CFG_ITEM_BOOL("mwislider", &ui_mwi_slider),
     CFG_ITEM_COMMENT("Invert mouse wheel for counters"),
     CFG_ITEM_BOOL("mwicounter", &ui_mwi_counter),
-    CFG_ITEM_COMMENT("Starmap scroll speed (1..10, 0 = instant)"),
-    CFG_ITEM_INT("sm_scroll_speed", &ui_sm_scroll_speed, check_ui_sm_scroll_speed),
     CFG_ITEM_BOOL("kbd_repeat", &ui_kbd_repeat),
     CFG_ITEM_END
 };
@@ -124,26 +88,10 @@ static int ui_options_set_scale(char **argv, void *var)
     return -1;
 }
 
-static int ui_options_set_scroll_speed(char **argv, void *var)
-{
-    int v = atoi(argv[1]);
-    if (check_ui_sm_scroll_speed((void *)(intptr_t)v)) {
-        ui_sm_scroll_speed = v;
-        return 0;
-    }
-    return -1;
-}
-
 const struct cmdline_options_s ui_cmdline_options[] = {
     { "-uiscale", 1,
       ui_options_set_scale, 0,
       "SCALE", "UI scaling factor" },
-    { "-uiextra", 0,
-      options_enable_bool_var, (void *)&ui_extra_enabled,
-      NULL, "Enable UI extras" },
-    { "-nouiextra", 0,
-      options_disable_bool_var, (void *)&ui_extra_enabled,
-      NULL, "Disable UI extras" },
     { "-mwislider", 0,
       options_enable_bool_var, (void *)&ui_mwi_slider,
       NULL, "Invert mouse wheel for sliders" },
@@ -156,9 +104,6 @@ const struct cmdline_options_s ui_cmdline_options[] = {
     { "-nomwicounter", 0,
       options_disable_bool_var, (void *)&ui_mwi_counter,
       NULL, "Do not invert mouse wheel for counters" },
-    { "-uismscroll", 1,
-      ui_options_set_scroll_speed, 0,
-      "SPEED", "Starmap scroll speed (1..10, 0 = instant)" },
     { NULL, 0, NULL, NULL, NULL, NULL }
 };
 
@@ -173,25 +118,10 @@ int ui_screen_h = 0;
 int ui_scale = 0;
 int ui_scale_hint = 0;
 int starmap_scale = 0;
-bool ui_extra_enabled = false;
-bool ui_illogical_hotkey_fix = false;
-bool ui_load_opts_extra = false;
 bool ui_space_combat_autoresolve = false;
-bool ui_sm_ships_enabled = false;
-bool ui_sm_expanded_scroll = false;
-bool ui_sm_no_question_mark_cursor = false;
-bool ui_sm_explicit_cursor_context = false;
-bool ui_mouse_lmb_fix = false;
-bool ui_mouse_warp_disabled = false;
 bool ui_copyprotection_disabled = false;
-bool ui_sm_mouseover_focus = false;
-bool ui_sm_smoother_scrolling = false;
-bool ui_sm_mouse_scroll = false;
-bool ui_sm_uhjk_scroll = false;
-bool ui_kbd_cursor_keys_fix = false;
 bool ui_mwi_slider = false;
 bool ui_mwi_counter = false;
-int ui_sm_scroll_speed = 3;
 bool ui_kbd_repeat = true;
 
 bool ui_use_audio = true;
@@ -438,11 +368,6 @@ static int set_ui_icon(void)
     return 0;
 }
 
-static void ui_fix_1_3a(void)
-{
-    ui_sm_no_question_mark_cursor = true;
-}
-
 /* -------------------------------------------------------------------------- */
 
 void ui_early_show_message_box(const char *msg)
@@ -492,7 +417,6 @@ int ui_late_init(void)
         log_error("V11.LBX not found! Make sure that your MOO1 is updated to v1.3.\n");
         return 1;
     }
-    ui_fix_1_3a();
     if (ui_scale_hint == 0) {
         ui_scale_hint = 1;
     }

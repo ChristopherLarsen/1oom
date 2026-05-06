@@ -35,9 +35,6 @@ static bool game_opt_new_game = false;
 static bool game_opt_continue = false;
 static int game_opt_load_game = 0;
 static const char *game_opt_load_fname = 0;
-static bool game_opt_undo_enabled = true;
-static bool game_opt_year_save_enabled = false;
-static bool game_opt_init_save_enabled = true;
 static bool game_opt_next_turn = false;
 static bool game_opt_save_quit = false;
 static const char *game_opt_ai_gate_path = 0;
@@ -413,7 +410,7 @@ static int game_run_ai_gate(struct game_s *g, const char *path)
     }
 
     /* DRG-FIXTURE-PATCH 2026-04-28: snapshot the original is_ai bitmask
-     * BEFORE forcing all players AI, so the optional -yearsave path below
+     * BEFORE forcing all players AI, so the yearly-save path below
      * can write saves that reflect the user's intended human/AI layout
      * (e.g. slot 0 = human) rather than the all-AI runtime mode ai-gate
      * uses internally. Without this, saves load as all-AI games and break
@@ -431,14 +428,14 @@ static int game_run_ai_gate(struct game_s *g, const char *path)
     game_ai_gate_write_meta(f, g);
     fputs(",\"checkpoints\":[", f);
     for (int turn = 1; turn <= 100; ++turn) {
-        /* DRG-FIXTURE-PATCH 2026-04-28: write a yearsave at start-of-turn
-         * when -yearsave is enabled, mirroring the UI loop's hook at
+        /* DRG-FIXTURE-PATCH 2026-04-28: write a yearsave at start-of-turn,
+         * mirroring the UI loop's hook at
          * game.c:1202 which fires inside UI_TURN_ACT_NEXT_TURN BEFORE
          * game_turn_process. Save with the ORIGINAL is_ai bitmask so the
          * resulting save captures the user's human/AI layout, then
          * restore the all-AI mask so game_turn_process keeps running
          * deterministically without any UI prompt. */
-        if (game_opt_year_save_enabled) {
+        {
             BOOLVEC_DECLARE(saved_is_ai, PLAYER_NUM);
             BOOLVEC_COPY(saved_is_ai, g->is_ai, PLAYER_NUM);
             BOOLVEC_COPY(g->is_ai, orig_is_ai, PLAYER_NUM);
@@ -846,18 +843,6 @@ const struct cmdline_options_s main_cmdline_options[] = {
     { "-continue", 0,
       game_opt_do_continue, 0,
       NULL, "Continue game" },
-    { "-undo", 0,
-      options_enable_bool_var, (void *)&game_opt_undo_enabled,
-      NULL, "Enable undo saves" },
-    { "-noundo", 0,
-      options_disable_bool_var, (void *)&game_opt_undo_enabled,
-      NULL, "Disable undo saves" },
-    { "-yearsave", 0,
-      options_enable_bool_var, (void *)&game_opt_year_save_enabled,
-      NULL, "Enable yearly saves" },
-    { "-noyearsave", 0,
-      options_disable_bool_var, (void *)&game_opt_year_save_enabled,
-      NULL, "Disable yearly saves" },
     { "-skipintro", 0,
       options_enable_bool_var, (void *)&game_opt_skip_intro_always,
       NULL, "Skip intro" },
@@ -984,12 +969,8 @@ static bool game_cfg_check_isai_value(void *val)
 }
 
 const struct cfg_items_s game_cfg_items[] = {
-    CFG_ITEM_BOOL("undo", &game_opt_undo_enabled),
-    CFG_ITEM_BOOL("yearsave", &game_opt_year_save_enabled),
-    CFG_ITEM_BOOL("initsave", &game_opt_init_save_enabled),
     CFG_ITEM_BOOL("skipintro", &game_opt_skip_intro_always),
     CFG_ITEM_BOOL("skiprandomnews", &game_opt_skip_random_news),
-    CFG_ITEM_BOOL("news_orion_colonized", &game_num_news_orion),
     CFG_ITEM_COMMENT("PLAYERS*100+GALAXYSIZE*10+DIFFICULTY"),
     CFG_ITEM_COMMENT(" 2..6, 0..3 = small..huge, 0..4 = simple..impossible"),
     CFG_ITEM_INT("new_game_opts", &game_opt_new_value, game_cfg_check_new_game_opts),
@@ -1021,7 +1002,6 @@ const struct cfg_items_s game_cfg_items[] = {
     CFG_ITEM_INT("rules_tech_cost_mul_ai", &game_num_tech_costmula2, NULL),
     CFG_ITEM_BOOL("rules_bt_precap_tohit", &game_num_bt_precap_tohit),
     CFG_ITEM_BOOL("rules_deterministic_rng", &game_num_deterministic),
-    CFG_ITEM_BOOL("rules_monster_rest_attack", &game_num_monster_rest_att),
     CFG_ITEM_BOOL("rules_fix_starting_ships", &game_opt_fix_starting_ships),
     CFG_ITEM_END
 };
@@ -1181,22 +1161,16 @@ int main_do(void)
                 main_menu_new_game:
                 game_new(&game, &game_aux, &game_new_opts);
                 game_opt_new_value = game_get_opts_value(&game);
-                if (game_opt_init_save_enabled) {
-                    game_save_do_save_i(GAME_SAVE_I_INIT, "Init", &game);
-                }
+                game_save_do_save_i(GAME_SAVE_I_INIT, "Init", &game);
                 break;
             case MAIN_MENU_ACT_CUSTOM_GAME:
                 game_new(&game, &game_aux, &game_opt_custom);
                 game_save_custom_opts_to_cfg(&game_opt_custom);
-                if (game_opt_init_save_enabled) {
-                    game_save_do_save_i(GAME_SAVE_I_INIT, "Init", &game);
-                }
+                game_save_do_save_i(GAME_SAVE_I_INIT, "Init", &game);
                 break;
             case MAIN_MENU_ACT_CHALLENGE_GAME:
                 game_new(&game, &game_aux, &game_challenge_opts);
-                if (game_opt_init_save_enabled) {
-                    game_save_do_save_i(GAME_SAVE_I_INIT, "Init", &game);
-                }
+                game_save_do_save_i(GAME_SAVE_I_INIT, "Init", &game);
                 break;
             case MAIN_MENU_ACT_TUTOR:
                 game_new_tutor(&game, &game_aux);
@@ -1285,10 +1259,10 @@ int main_do(void)
                         game_end.type = GAME_END_QUIT;
                         break;
                     case UI_TURN_ACT_NEXT_TURN:
-                        if (game_opt_undo_enabled && game_save_do_save_i(GAME_SAVE_I_UNDO, "Undo", &game)) {
+                        if (game_save_do_save_i(GAME_SAVE_I_UNDO, "Undo", &game)) {
                             log_error("Game: could create undo save\n");
                         }
-                        if (game_opt_year_save_enabled && game_save_do_save_year(NULL, &game)) {
+                        if (game_save_do_save_year(NULL, &game)) {
                             log_error("Game: could create year save\n");
                         }
                         break;

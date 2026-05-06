@@ -406,13 +406,9 @@ static void main_menu_make_options_page(struct main_menu_data_s *d)
 static void main_menu_make_options_input_page(struct main_menu_data_s *d)
 {
     d->set_item_dimensions = mm_options_set_item_dimensions;
-    menu_make_bool(menu_allocate_item(), "Disable Mouse Warp", &ui_mouse_warp_disabled, MOO_KEY_w);
-    menu_make_bool(menu_allocate_item(), "LMB Behavior Fix", &ui_mouse_lmb_fix, MOO_KEY_l);
     menu_make_bool(menu_allocate_item(), "Invert slider", &ui_mwi_slider, MOO_KEY_i);
     menu_make_bool(menu_allocate_item(), "Invert counter", &ui_mwi_counter, MOO_KEY_n);
     menu_make_bool_func(menu_allocate_item(), "Keyboard repeat", &ui_kbd_repeat, main_menu_toggle_kbd_repeat, MOO_KEY_k);
-    menu_make_bool(menu_allocate_item(), "Direction Keys Fix", &ui_kbd_cursor_keys_fix, MOO_KEY_d);
-    menu_make_bool(menu_allocate_item(), "Illogical Hotkey Fix", &ui_illogical_hotkey_fix, MOO_KEY_h);
     menu_make_back(menu_allocate_item());
 }
 
@@ -437,10 +433,7 @@ static void main_menu_make_options_video_page(struct main_menu_data_s *d)
 static void main_menu_make_options_addons_page(struct main_menu_data_s *d)
 {
     d->set_item_dimensions = mm_options_set_item_dimensions;
-    menu_make_bool(menu_allocate_item(), "UI Extra", &ui_extra_enabled, MOO_KEY_e);
     menu_make_bool(menu_allocate_item(), "Combat Autoresolve", &ui_space_combat_autoresolve, MOO_KEY_v);
-    menu_make_bool(menu_allocate_item(), "UI SM Ships", &ui_sm_ships_enabled, MOO_KEY_s);
-    menu_make_bool(menu_allocate_item(), "Load Options Extra", &ui_load_opts_extra, MOO_KEY_o);
     menu_make_page(menu_allocate_item(), "Message Filter", MAIN_MENU_PAGE_OPTIONS_ADDONS_MESSAGE_FILTER, MOO_KEY_m);
     menu_make_back(menu_allocate_item());
 }
@@ -462,7 +455,6 @@ static void main_menu_make_options_misc_page(struct main_menu_data_s *d)
     menu_make_bool(menu_allocate_item(), "Skip Intro", &game_opt_skip_intro_always, MOO_KEY_i);
     menu_make_bool(menu_allocate_item(), "Skip Random News", &game_opt_skip_random_news, MOO_KEY_n);
     menu_make_bool(menu_allocate_item(), "Skip Copy Protection", &ui_copyprotection_disabled, MOO_KEY_p);
-    menu_make_bool(menu_allocate_item(), "News Orion Colonized", &game_num_news_orion, MOO_KEY_o);
     menu_make_bool(menu_allocate_item(), "UI Delay Enabled", &ui_delay_enabled, MOO_KEY_d);
     menu_make_back(menu_allocate_item());
 }
@@ -470,13 +462,6 @@ static void main_menu_make_options_misc_page(struct main_menu_data_s *d)
 static void main_menu_make_options_starmap_page(struct main_menu_data_s *d)
 {
     d->set_item_dimensions = mm_options_set_item_dimensions;
-    menu_make_bool(menu_allocate_item(), "Explicit Cursor Context", &ui_sm_explicit_cursor_context, MOO_KEY_c);
-    menu_make_bool(menu_allocate_item(), "Expanded Scroll", &ui_sm_expanded_scroll, MOO_KEY_e);
-    menu_make_bool(menu_allocate_item(), "Mouseover Focus", &ui_sm_mouseover_focus, MOO_KEY_m);
-    menu_make_bool(menu_allocate_item(), "Scroll by mouse", &ui_sm_mouse_scroll, MOO_KEY_s);
-    menu_make_bool(menu_allocate_item(), "UHJK scroll", &ui_sm_uhjk_scroll, MOO_KEY_u);
-    menu_make_bool(menu_allocate_item(), "Smoother scrolling", &ui_sm_smoother_scrolling, MOO_KEY_o);
-    menu_make_int(menu_allocate_item(), "Scroll speed", &ui_sm_scroll_speed, 0, UI_SCROLL_SPEED_MAX, MOO_KEY_p);
     menu_make_back(menu_allocate_item());
 }
 
@@ -515,7 +500,6 @@ static void main_menu_make_options_rules_difficulty_page(struct main_menu_data_s
 static void main_menu_make_options_rules_fleet_behavior_page(struct main_menu_data_s *d)
 {
     d->set_item_dimensions = mm_options_set_item_dimensions;
-    menu_make_bool(menu_allocate_item(), "Monster Rest Attack", &game_num_monster_rest_att, MOO_KEY_UNKNOWN);
     menu_make_back(menu_allocate_item());
 }
 

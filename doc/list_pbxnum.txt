@@ -49,15 +49,6 @@ bt_oracle_fix : 0..1, 0
 weapon_list_max : 0..64, 30
   - Max. number of weapons shown in the ship design weapon list.
 
-news_orion : 0..1, 0
-  - Show news when Orion is first colonized.
-    MOO1 has a news item for conquering Orion but never shows it.
-
-aud_ask_break_nap : 0..1, 0
-  - Include Non-Aggression Pact in Break Alliance With Another Race.
-    The OSG claims that the audience dialog option is enabled if a NAP exists
-    between any of the opponents. This is a filthy lie.
-
 aud_bounty_give : 0..1, 0
   - Give promised bounty.
     The AI sometimes promises to give rewards for attacking an another player.
@@ -74,11 +65,6 @@ update_on_load : 0..1, 1
 
 newtech_adjust_fix : 0..1, 1
   - Do not reset the eco slider in the 25/50/75% dialog.
-
-monster_rest_att : 0..1, 0
-  - Allow attacking resting space monsters.
-    In MOO1 it is impossible to attack a space crystal or amoeba after the
-    turn it has reached a planet.
 
 orbital_bio_fix : 0..1, 0
   - Remove passive bio damage
@@ -146,9 +132,6 @@ waste_adjust_fix : 0..1, 0
     In MOO1 the sum of sliders can exceed 100 due to weird math in the waste
     elimination slider adjustment code. This fix does not address the effects
     of integer division.
-
-slider_respects_locks : 0..1, 0
-  - Waste elimination slider autoadjustment does not change locked sliders.
 
 pop_tenths_fix: 0..1, 0
   - Do not add population tenths twice.

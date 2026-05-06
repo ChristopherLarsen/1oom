@@ -76,7 +76,7 @@ index 123a3446..7e88120f 100644
      }
  
 +    /* DRG-FIXTURE-PATCH 2026-04-28: snapshot the original is_ai bitmask
-+     * BEFORE forcing all players AI, so the optional -yearsave path below
++     * BEFORE forcing all players AI, so the yearly-save path below
 +     * can write saves that reflect the user's intended human/AI layout
 +     * (e.g. slot 0 = human) rather than the all-AI runtime mode ai-gate
 +     * uses internally. Without this, saves load as all-AI games and break
@@ -91,14 +91,14 @@ index 123a3446..7e88120f 100644
      game_ai_gate_write_meta(f, g);
      fputs(",\"checkpoints\":[", f);
      for (int turn = 1; turn <= 100; ++turn) {
-+        /* DRG-FIXTURE-PATCH 2026-04-28: write a yearsave at start-of-turn
-+         * when -yearsave is enabled, mirroring the UI loop's hook at
++        /* DRG-FIXTURE-PATCH 2026-04-28: write a yearsave at start-of-turn,
++         * mirroring the UI loop's hook at
 +         * game.c:1202 which fires inside UI_TURN_ACT_NEXT_TURN BEFORE
 +         * game_turn_process. Save with the ORIGINAL is_ai bitmask so the
 +         * resulting save captures the user's human/AI layout, then
 +         * restore the all-AI mask so game_turn_process keeps running
 +         * deterministically without any UI prompt. */
-+        if (game_opt_year_save_enabled) {
++        {
 +            BOOLVEC_DECLARE(saved_is_ai, PLAYER_NUM);
 +            BOOLVEC_COPY(saved_is_ai, g->is_ai, PLAYER_NUM);
 +            BOOLVEC_COPY(g->is_ai, orig_is_ai, PLAYER_NUM);

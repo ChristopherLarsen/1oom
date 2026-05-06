@@ -29,11 +29,11 @@ extern int game_num_max_tribute_bc;
 extern int game_num_event_roll;
 extern bool game_num_accident_chk_factories;
 extern int game_num_council_years;
-extern bool game_num_news_orion;
-extern bool game_num_aud_ask_break_nap;
-extern bool game_num_monster_rest_att;
+#define game_num_news_orion true
+#define game_num_aud_ask_break_nap true
+#define game_num_monster_rest_att true
 extern bool game_num_orbital_weap_any;
-extern bool game_num_slider_respects_locks;
+#define game_num_slider_respects_locks true
 extern uint8_t game_num_eco_slider_slack;
 extern bool game_num_reset_tform_to_max;
 extern bool game_num_extended_reloc_range;
