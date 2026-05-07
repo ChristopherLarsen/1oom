@@ -419,16 +419,10 @@ static void game_ai_classic_turn_p1_front(struct game_s *g, struct ai_turn_p1_s 
                         uint64_t v;
                         v = ait->tbl_shipthreat[pi][j] * n;
                         sum += v;
-                        if (g->ai_id == GAME_AI_CLASSIC) {
-                            v &= 0xffffffff;    /* WASBUG MOO1 uses 32 bit var */
-                        }
                         ait->tbl_force_own[i] += v;
                     }
                 }
             }
-        }
-        if (g->ai_id == GAME_AI_CLASSIC) {
-            sum &= 0xffffffff;  /* WASBUG MOO1 uses 32 bit var */
         }
         if (sum != 0) {
             for (int i = 0; i < ait->num_fronts; ++i) {
@@ -542,9 +536,7 @@ static void game_turn_fleet_send(struct game_s *g, struct ai_turn_p1_s *ait, pla
         if (n > 0) {
             uint8_t s;
             r->ships[i] = n;
-            if (g->ai_id == GAME_AI_CLASSICPLUS) {
-                o->ships[i] = 0;
-            }
+            o->ships[i] = 0;
             ++num_shiptypes;
             s = g->srd[pi].design[i].engine;
             SETMIN(speed, s);
@@ -571,16 +563,10 @@ static void game_turn_fleet_send(struct game_s *g, struct ai_turn_p1_s *ait, pla
     }
     {
         bool all_sent = true;
-        if (g->ai_id == GAME_AI_CLASSICPLUS) {
-            for (int i = 0; i < NUM_SHIPDESIGNS; ++i) {
-                if (o->ships[i]) {
-                    all_sent = false;
-                    break;
-                }
-            }
-        } else {
-            for (int i = 0; i < NUM_SHIPDESIGNS; ++i) {
-                o->ships[i] = 0;    /* BUG ships removed even if they were not sent due to range == 2 && !reserve_fuel */
+        for (int i = 0; i < NUM_SHIPDESIGNS; ++i) {
+            if (o->ships[i]) {
+                all_sent = false;
+                break;
             }
         }
         if (all_sent) {
@@ -595,7 +581,7 @@ static void game_ai_classic_turn_p1_send_colony_ships(struct game_s *g, struct a
 {
     empiretechorbit_t *e = &(g->eto[pi]);
     planet_type_t can_colonize = PLANET_TYPE_MINIMAL;
-    int range = e->fuel_range * 15, si = e->shipi_colony, num_planet_colonize = 0;
+    int si = e->shipi_colony, num_planet_colonize = 0;
     uint8_t tbl_planet_colonize[PLANETS_MAX];
     shipcount_t tbl_orbit[PLANETS_MAX];
     BOOLVEC_DECLARE(tbl_planet_ignore, PLANETS_MAX);
@@ -659,19 +645,11 @@ static void game_ai_classic_turn_p1_send_colony_ships(struct game_s *g, struct a
             }
         }
         if (mini != PLANET_NONE) {
-            const planet_t *p2;
-            p2 = &(g->planet[mini]);
-            if ((g->ai_id == GAME_AI_CLASSICPLUS) || (util_math_dist_fast(p->x, p->y, p2->x, p2->y) <= range)) {
-                if (g->enroute_num >= FLEET_ENROUTE_AI_MAX) {
-                    log_warning("fleet enroute table (size %i/%i) too large for AI fleet (%i)!\n", g->enroute_num, FLEET_ENROUTE_MAX, FLEET_ENROUTE_AI_MAX);
-                } else {
-                    game_turn_fleet_send(g, ait, pi, mini, pli);
-                    if (g->ai_id == GAME_AI_CLASSICPLUS) {
-                        /* WASBUG MOO1 does not update the local copy and may try to send multiple
-                           colony ship fleets from the same planet */
-                        tbl_orbit[mini] = e->orbit[mini].ships[si];
-                    }
-                }
+            if (g->enroute_num >= FLEET_ENROUTE_AI_MAX) {
+                log_warning("fleet enroute table (size %i/%i) too large for AI fleet (%i)!\n", g->enroute_num, FLEET_ENROUTE_MAX, FLEET_ENROUTE_AI_MAX);
+            } else {
+                game_turn_fleet_send(g, ait, pi, mini, pli);
+                tbl_orbit[mini] = e->orbit[mini].ships[si];
             }
         }
     }
@@ -765,9 +743,6 @@ static void game_ai_classic_turn_p1_send_attack(struct game_s *g, struct ai_turn
                 if (pt->owner != PLAYER_NONE) {
                     e2 = &(g->eto[pt->owner]);
                     weight += ((e2->tech.percent[TECH_FIELD_WEAPON] * 5) + (e2->have_planet_shield + 10) * 10) * pt->missile_bases;
-                }
-                if (g->ai_id == GAME_AI_CLASSIC) {
-                    weight &= 0xffffffff;   /* WASBUG MOO1 uses 32 bit var */
                 }
                 if (ait->tbl_force_own[pfrom] > weight) {
                     pto2 = pto;
@@ -879,11 +854,6 @@ static void game_ai_classic_turn_p1_send_defend(struct game_s *g, struct ai_turn
             tbl_planet_threat[i] = 50;
         }
     }
-    if (g->ai_id == GAME_AI_CLASSIC) {
-        for (int i = 0; i < g->galaxy_stars; ++i) {
-            tbl_planet_threat[i] &= 0xffffffff; /* WASBUG MOO1 uses 32 bit var */
-        }
-    }
     for (int i = 0; i < g->galaxy_stars; ++i) {
         const planet_t *p = &(g->planet[i]);
         if ((p->owner == pi) && (((ait->tbl_force_own[i] * 4) / 3) < tbl_planet_threat[i])) {
@@ -989,7 +959,7 @@ static void game_ai_classic_turn_p1_trans_en(struct game_s *g, struct ai_turn_p1
         }
         BOOLVEC_SET(tbl_trans_to, i, have_orbit);
         BOOLVEC_SET(tbl_trans_from, i, (p->owner == pi) && (p->pop >= (p->max_pop3 / 2)) && (p->pop > 20)
-          && ((g->ai_id == GAME_AI_CLASSIC) || (p->unrest != PLANET_UNREST_REBELLION)));
+          && (p->unrest != PLANET_UNREST_REBELLION));
     }
     for (int i = 0; i < g->transport_num; ++i) {
         const transport_t *r = &(g->transport[i]);
@@ -1038,7 +1008,7 @@ static void game_ai_classic_turn_p1_trans_own(struct game_s *g, struct ai_turn_p
             if ((p->pop < (p->max_pop3 / 3)) || (p->unrest == PLANET_UNREST_REBELLION)) {
                 BOOLVEC_SET1(tbl_trans_to, i);
             }
-            if (p->pop > ((p->max_pop3 * 3) / 4) && ((g->ai_id == GAME_AI_CLASSIC) || (p->unrest != PLANET_UNREST_REBELLION))) {
+            if (p->pop > ((p->max_pop3 * 3) / 4) && (p->unrest != PLANET_UNREST_REBELLION)) {
                 BOOLVEC_SET1(tbl_trans_from, i);
             }
         }
@@ -1080,7 +1050,7 @@ static void game_ai_classic_turn_p1_build_defending_ships(struct game_s *g, play
         const fleet_enroute_t *r = &(g->enroute[i]);
         if (1
           && (r->owner != pi)
-          && ((g->ai_id == GAME_AI_CLASSIC) || (e->treaty[r->owner] != TREATY_ALLIANCE))
+          && (e->treaty[r->owner] != TREATY_ALLIANCE)
           && (g->planet[r->dest].owner == pi)
         ) {
             BOOLVEC_SET1(tbl_incoming, r->dest);
@@ -1154,9 +1124,6 @@ static void game_ai_classic_turn_p1(struct game_s *g)
                 if (g->end != GAME_END_NONE) {
                     v *= 2;
                 }
-            }
-            if (g->ai_id == GAME_AI_CLASSIC) {
-                v &= 0xffff;    /* WASBUG the table variables are 16 bit in MOO1 */
             }
             ait->tbl_shipthreat[pi][i] = v;
         }
@@ -1393,7 +1360,7 @@ static void game_ai_classic_design_ship_base(struct game_s *g, struct ai_turn_p2
         int v;
         v = game_design_build_tbl_fit_engine(g, &ait->gd, tbl_have);
         v = count_havebuf_items(tbl_have, v);
-        if (g->ai_id == GAME_AI_CLASSIC || v < 2) {
+        if (v < 2) {
             v = game_ai_classic_design_ship_get_item(g, v, 60);
         } else {
             if (v > 2) {
@@ -2159,7 +2126,7 @@ static void game_ai_classic_battle_ai_ai_get_weights(const struct game_s *g, pla
         tbl[i] += sd->special[2] * 2;
         tbl[i] += e->tech.percent[TECH_FIELD_CONSTRUCTION] / 2;
         if ((e->race == RACE_MRRSHAN) || (e->race == RACE_ALKARI)) {
-            tbl[i] += ((g->ai_id == GAME_AI_CLASSIC) ? 15 : 20);
+            tbl[i] += 20;
         }
         tbl[i] *= game_num_tbl_hull_w[sd->hull];
     }
@@ -2242,12 +2209,6 @@ static bool game_ai_classic_battle_ai_ai_resolve_do(struct battle_s *bt)
             }
         }
     }
-    if (g->ai_id == GAME_AI_CLASSIC) {
-        /* WASBUG MOO1 uses ui_main_loop_action for the switch variable below;
-           since it is UI_MAIN_LOOP_NEXT_TURN (== 8) at this point, bt->bases is unaffected.
-        */
-        return r_won;
-    }
     switch (bt->planet_side) {
         case SIDE_NONE:
             bt->bases = 0;
@@ -2290,14 +2251,7 @@ static int game_ai_battle_missile_dmg(const struct battle_s *bt, int missile_i)
         damagediv = 2;
     }
     damage = w->damagemax / damagediv;
-    if (bt->g->ai_id == GAME_AI_CLASSIC) {
-        int absorbdiv = game_battle_get_absorbdiv(b, w, true); /* WASBUG checks target's Oracle */
-        /* WASBUG should be damage -= b->absorb / absorbdiv; if Oracle worked for missiles */
-        damage -= b->absorb;
-        damage /= absorbdiv;
-    } else {
-        damage -= b->absorb;    /* missiles are not affected by Oracle */
-    }
+    damage -= b->absorb;    /* missiles are not affected by Oracle */
     damage *= w->damagemul;
     SETMIN(damage, b->hp1);
     damage *= m->damagemul2;
@@ -2406,18 +2360,12 @@ static int game_ai_battle_dmggive(struct battle_s *bt, int itemi1, int itemi2, i
         miss_chance_missile += 50;
     }
     SETRANGE(miss_chance_beam, 0, 95);
-    if (bt->g->ai_id == GAME_AI_CLASSICPLUS) {
-        SETMIN(miss_chance_missile, 95);
-    }
+    SETMIN(miss_chance_missile, 95);
     dist = util_math_dist_maxabs(b->sx, b->sy, bd->sx, bd->sy);
     for (int i = 0; i < num_weap; ++i) {
         const struct shiptech_weap_s *w = &(tbl_shiptech_weap[b->wpn[i].t]);
         int absorbdiv, range;
-        if (bt->g->ai_id == GAME_AI_CLASSIC) {
-            absorbdiv = game_battle_get_absorbdiv(bd, w, true); /* WASBUG checks target's oracle */
-        } else {
-            absorbdiv = game_battle_get_absorbdiv(b, w, false);
-        }
+        absorbdiv = game_battle_get_absorbdiv(b, w, false);
         if (itemi2 == 0/*planet*/) {
             if ((!w->is_bomb) && ((w->misstype > 0) || (w->damagemin != w->damagemax))) {
                 damagediv = 2;
@@ -2445,9 +2393,6 @@ static int game_ai_battle_dmggive(struct battle_s *bt, int itemi1, int itemi2, i
                 int miss_chance;
                 miss_chance = miss_chance_missile - w->extraacc * 10;
                 SETRANGE(miss_chance, 0, 95);
-                if (bt->g->ai_id == GAME_AI_CLASSIC) {
-                    miss_chance_missile = miss_chance; /* WASBUG MOO1 substracts for every missile weapon */
-                }
                 dmg = ((100 - miss_chance) / 5) * (w->damagemax - bd->absorb / absorbdiv);
                 dmg /= damagediv;
                 dmg *= w->damagemul;
@@ -2458,23 +2403,14 @@ static int game_ai_battle_dmggive(struct battle_s *bt, int itemi1, int itemi2, i
                 miss_chance = miss_chance_beam;
                 if (bd->absorb > w->damagemin) {
                     miss_chance += ((100 - miss_chance) * (bd->absorb + 1 - w->damagemin)) / (w->damagemax + 1 - w->damagemin);
-                    if (bt->g->ai_id == GAME_AI_CLASSICPLUS) {
-                        SETMIN(miss_chance, 95);
-                    }
-                }
-                if (bt->g->ai_id == GAME_AI_CLASSIC) {
-                    miss_chance_beam = miss_chance; /* WASBUG MOO1 adds for every beam weapon */
+                    SETMIN(miss_chance, 95);
                 }
                 /*5861e*/
                 if ((w->damagemax / damagediv) > (bd->absorb / absorbdiv)) {
                     int dmgmin, dmgmax;
                     dmgmax = (w->damagemax / damagediv) - (bd->absorb / absorbdiv);
-                    if (bt->g->ai_id == GAME_AI_CLASSIC) {
-                        dmgmin = (w->damagemin > bd->absorb) ? (w->damagemin - bd->absorb) : 1; /* WASBUG {damage,absorb}div? */
-                    } else {
-                        dmgmin = (w->damagemin / damagediv) - (bd->absorb / absorbdiv);
-                        SETMAX(dmgmin, 1);
-                    }
+                    dmgmin = (w->damagemin / damagediv) - (bd->absorb / absorbdiv);
+                    SETMAX(dmgmin, 1);
                     dmg = (dmgmax + dmgmin) / 2;
                     dmg = ((100 - miss_chance) * dmg) / 5;
                     dmg *= w->damagemul;
@@ -2782,14 +2718,10 @@ static int game_battle_ai_best_range(struct battle_s *bt, int target_i)
         for (int j = 0; j < WEAPON_SLOT_NUM; ++j) {
             const struct shiptech_weap_s *w = &(tbl_shiptech_weap[b->wpn[j].t]);
             int absorbdiv, range;
-            if (bt->g->ai_id == GAME_AI_CLASSIC) {
-                absorbdiv = game_battle_get_absorbdiv(bd, w, true); /* WASBUG checks target's oracle */
+            if (w->damagemin != w->damagemax) {
+                absorbdiv = game_battle_get_absorbdiv(b, w, false);
             } else {
-                if (w->damagemin != w->damagemax) {
-                    absorbdiv = game_battle_get_absorbdiv(b, w, false);
-                } else {
-                    absorbdiv = 1;
-                }
+                absorbdiv = 1;
             }
             if (target_i == 0/*planet*/) {
                 if ((!w->is_bomb) && ((w->misstype > 0) || (w->damagemin != w->damagemax))) {
@@ -3282,13 +3214,8 @@ static bool game_ai_classic_battle_ai_retreat(struct battle_s *bt)
                 break;
         }
         v += rnd_1_n(15, &bt->g->seed);
-        if (bt->g->ai_id == GAME_AI_CLASSICPLUS) {
-            w[SIDE_R] = (dmg[SIDE_R] * 100) / hp[SIDE_R];
-            w[SIDE_L] = (dmg[SIDE_L] * 100 * v) / hp[SIDE_L];
-        } else { /* WASBUG MOO1 uses 32b vars which can overflow on extreme cases */
-            w[SIDE_R] = (int32_t)((((int32_t)dmg[SIDE_R]) * 100) / hp[SIDE_R]);
-            w[SIDE_L] = (int32_t)((((int32_t)dmg[SIDE_L]) * 100 * v) / hp[SIDE_L]);
-        }
+        w[SIDE_R] = (dmg[SIDE_R] * 100) / hp[SIDE_R];
+        w[SIDE_L] = (dmg[SIDE_L] * 100 * v) / hp[SIDE_L];
         if (w[SIDE_R] > w[SIDE_L]) {
             return true;
         }
@@ -3316,12 +3243,8 @@ static bool game_ai_classic_bomb(struct game_s *g, player_id_t player, uint8_t p
     bool flag_do_bomb;
     const planet_t *p = &(g->planet[planet]);
     if (g->eto[player].race == RACE_BULRATHI) {
-        if (g->ai_id == GAME_AI_CLASSICPLUS) {
-            /* OSG states 2.15:1 average kill:death ratio for +20 (+Bulrathi -Defense) advantage */
-            pop_inbound = (pop_inbound * 215) / 100;
-        } else {
-            pop_inbound += pop_inbound / 5;
-        }
+        /* OSG states 2.15:1 average kill:death ratio for +20 (+Bulrathi -Defense) advantage */
+        pop_inbound = (pop_inbound * 215) / 100;
     }
     flag_do_bomb = (p->pop > pop_inbound);
     if ((IS_HUMAN(g, p->owner)) && (g->evn.ceasefire[p->owner][player] > 0)) {
@@ -3762,9 +3685,6 @@ static void game_ai_classic_turn_diplo_p1(struct game_s *g)
                    This is weird, nondeterministic (in MOO1) and unworkable for multiplayer.
                    Whether v is what was intended is unknown, but it makes a whole lot more sense.
                 */
-                if (g->ai_id == GAME_AI_CLASSIC) {
-                    v = g->evn.diplo_msg_subtype;
-                }
                 if ((e1->treaty[p2] == TREATY_WAR) && ((v + e1->mood_peace[p2]) > 100)) {
                     game_diplo_stop_war(g, p1, p2);
                 }
@@ -4226,7 +4146,7 @@ static int game_ai_classic_aud_treaty_alliance(struct audience_s *au)
 static int game_ai_classic_aud_treaty_peace(struct audience_s *au)
 {
     int si;
-    int mi = (au->g->ai_id == GAME_AI_CLASSICPLUS) ? 2/*peace*/ : 0/*treaty*/;  /* WASBUG? mood_peace makes sense */
+    int mi = 2/*peace*/;
     si = game_ai_classic_aud_check_mood(au, 60, mi);
     return si;
 }
@@ -4242,13 +4162,7 @@ static int game_ai_classic_aud_treaty_declare_war(struct audience_s *au)
         si = (!rnd_0_nm1(8, &g->seed)) ? 2 : 3;
     } else {
         int v = ea->relation1[au->pstartwar] + 150;
-        if (g->ai_id != GAME_AI_CLASSIC) {
-            /* WASBUG?
-               MOO1 contains the treaty * 30 code but the result is unused.
-               OSG states that either NAP or alliance changes that 150 to 250 but there is no such code.
-            */
-            v += ea->treaty[au->pstartwar] * 30;
-        }
+        v += ea->treaty[au->pstartwar] * 30;
         si = game_ai_classic_aud_check_mood(au, v, 0);
     }
     return si;
@@ -4334,13 +4248,8 @@ static uint8_t game_ai_classic_aud_threaten(struct audience_s *au)
             dtype = 69;
         }
     } else {
-        if (g->ai_id == GAME_AI_CLASSICPLUS) {
-            ea->spymode_next[ph] = SPYMODE_HIDE;
-            ea->spymode[ph] = SPYMODE_HIDE;
-        } else { /* WASBUG MOO1 hides your spies */
-            eh->spymode_next[pa] = SPYMODE_HIDE;
-            eh->spymode[pa] = SPYMODE_HIDE;
-        }
+        ea->spymode_next[ph] = SPYMODE_HIDE;
+        ea->spymode[ph] = SPYMODE_HIDE;
         g->evn.ceasefire[ph][pa] = rnd_1_n(15, &g->seed) + 5;
         dtype = 70;
         if (v >= 275) {
@@ -4380,11 +4289,7 @@ static void game_ai_classic_aud_tribute_bc(struct audience_s *au, int selected, 
            This makes money tributes quite useless.
            The formula below is according to OSG.
         */
-        if (g->ai_id == GAME_AI_CLASSICPLUS) {
-            v = (bc * 12) / ea->total_production_bc;
-        } else {
-            v = 0;
-        }
+        v = (bc * 12) / ea->total_production_bc;
     } else {
         v = selected + 1;
     }
@@ -4399,10 +4304,7 @@ static void game_ai_classic_aud_tribute_bc(struct audience_s *au, int selected, 
     if (eh->treaty[pa] != TREATY_ALLIANCE) {
         SETMIN(ea->relation1[ph], 65);
     }
-    /* BUG? eh->relation1[pa] = ea->relation1[ph]; is missing */
-    if (g->ai_id == GAME_AI_CLASSICPLUS) {
-        eh->relation1[pa] = ea->relation1[ph];
-    }
+    eh->relation1[pa] = ea->relation1[ph];
 }
 
 static void game_ai_classic_aud_tribute_tech(struct audience_s *au, int selected, tech_field_t field, uint8_t tech)
@@ -4431,10 +4333,7 @@ static void game_ai_classic_aud_tribute_tech(struct audience_s *au, int selected
     if (eh->treaty[pa] != TREATY_ALLIANCE) {
         SETMIN(ea->relation1[ph], 70);
     }
-    /* BUG? eh->relation1[pa] = ea->relation1[ph]; is missing */
-    if (g->ai_id == GAME_AI_CLASSICPLUS) {
-        eh->relation1[pa] = ea->relation1[ph];
-    }
+    eh->relation1[pa] = ea->relation1[ph];
 }
 
 static int game_ai_classic_aud_tech_scale(struct audience_s *au)
@@ -4510,43 +4409,6 @@ static bool game_ai_classic_aud_later(struct audience_s *au)
 
 const struct game_ai_s game_ai_classic = {
     GAME_AI_CLASSIC,
-    "Classic",
-    game_ai_classic_new_game_init,
-    game_ai_classic_new_game_tech,
-    game_ai_classic_turn_p1,
-    game_ai_classic_turn_p2,
-    game_ai_classic_turn_p3,
-    game_ai_classic_battle_ai_ai_resolve,
-    game_ai_classic_battle_ai_turn,
-    game_ai_classic_battle_ai_retreat,
-    game_ai_classic_tech_next,
-    game_ai_classic_bomb,
-    game_ai_classic_ground,
-    game_ai_classic_crank_tech, /* plague */
-    game_ai_classic_crank_tech, /* nova */
-    game_ai_classic_crank_ship, /* comet */
-    game_ai_classic_crank_ship, /* pirates */
-    game_ai_classic_vote,
-    game_ai_classic_turn_diplo_p1,
-    game_ai_classic_turn_diplo_p2,
-    game_ai_classic_aud_start_human,
-    game_ai_classic_aud_treaty_nap,
-    game_ai_classic_aud_treaty_alliance,
-    game_ai_classic_aud_treaty_peace,
-    game_ai_classic_aud_treaty_declare_war,
-    game_ai_classic_aud_treaty_break_alliance,
-    game_ai_classic_aud_trade,
-    game_ai_classic_aud_sweeten,
-    game_ai_classic_aud_threaten,
-    game_ai_classic_aud_tribute_bc,
-    game_ai_classic_aud_tribute_tech,
-    game_ai_classic_aud_tech_scale,
-    game_ai_classic_aud_get_dtype,
-    game_ai_classic_aud_later
-};
-
-const struct game_ai_s game_ai_classicplus = {
-    GAME_AI_CLASSICPLUS,
     "Classic+",
     game_ai_classic_new_game_init,
     game_ai_classic_new_game_tech,

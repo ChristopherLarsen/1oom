@@ -470,11 +470,8 @@ static void game_start(struct game_s *g)
         g->seed = rnd_get_new_seed();
         log_message("Game: seed was 0, got new seed 0x%0x\n", g->seed);
     }
-    if (g->ai_id >= GAME_AI_NUM) {
-        log_warning("Game: AI ID was %i >= %i, setting to %i (%s)\n", g->ai_id, GAME_AI_NUM, GAME_AI_CLASSIC, game_ais[GAME_AI_CLASSIC]->name);
-        g->ai_id = GAME_AI_CLASSIC;
-    }
-    game_ai = game_ais[g->ai_id];
+    g->ai_id = GAME_AI_CLASSIC;
+    game_ai = game_ais[GAME_AI_CLASSIC];
     game_update_production(g);
     game_update_tech_util(g);
     game_update_within_range(g);
@@ -738,22 +735,6 @@ static int game_opt_set_new_home(char **argv, void *var)
     return 0;
 }
 
-static int game_opt_set_new_ai(char **argv, void *var)
-{
-    uint32_t v = 0;
-    if (!util_parse_number(argv[1], &v)) {
-        log_error("invalid value '%s'\n", argv[1]);
-        return -1;
-    } else if (v > GAME_AI_NUM) {
-        log_error("invalid AI num %i\n", v);
-        return -1;
-    }
-    game_opt_new.ai_id = v;
-    log_message("Game: AI type %i '%s'\n", v, game_ais[v]->name);
-    return 0;
-}
-
-
 static int game_opt_do_load(char **argv, void *var)
 {
     uint32_t v = 0;
@@ -834,9 +815,6 @@ const struct cmdline_options_s main_cmdline_options[] = {
     { "-ngh", 2,
       game_opt_set_new_home, 0,
       "PLAYER NAME", "Set new game home world name for player 1..6" },
-    { "-nga", 1,
-      game_opt_set_new_ai, 0,
-      "AITYPE", "Set new game AI type (0..1)" },
     { "-load", 1,
       game_opt_do_load, 0,
       "SAVE", "Load game (1..8, 2300.. or filename)\n1..6 are regular save slots\n7 is continue game\n8 is undo\n2300 and over are yearly saves" },
@@ -888,16 +866,6 @@ static bool game_cfg_check_players_value(void *val)
     int v = (int)(intptr_t)val;
     if ((v < 2) || (v > PLAYER_NUM)) {
         log_error("invalid players num %i\n", v);
-        return false;
-    }
-    return true;
-}
-
-static bool game_cfg_check_custom_game_ai_id(void *val)
-{
-    int v = (int)(intptr_t)val;
-    if (v >= GAME_AI_NUM || v < 0) {
-        log_error("invalid ai id %i\n", v);
         return false;
     }
     return true;
@@ -974,7 +942,6 @@ const struct cfg_items_s game_cfg_items[] = {
     CFG_ITEM_COMMENT("PLAYERS*100+GALAXYSIZE*10+DIFFICULTY"),
     CFG_ITEM_COMMENT(" 2..6, 0..3 = small..huge, 0..4 = simple..impossible"),
     CFG_ITEM_INT("new_game_opts", &game_opt_new_value, game_cfg_check_new_game_opts),
-    CFG_ITEM_INT("custom_game_ai_id", &game_opt_custom.ai_id, game_cfg_check_custom_game_ai_id),
     CFG_ITEM_INT("custom_game_difficulty", &game_opt_custom.difficulty, game_cfg_check_difficulty_value),
     CFG_ITEM_INT("custom_game_galaxy_size", &game_opt_custom.galaxy_size, game_cfg_check_galaxy_size_value),
     CFG_ITEM_INT("custom_game_players", &game_opt_custom.players, game_cfg_check_players_value),

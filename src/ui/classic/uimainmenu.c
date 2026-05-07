@@ -89,10 +89,6 @@ static const char* mm_get_custom_galaxy_size_value(uint32_t i) {
     return game_str_tbl_gsize[i];
 }
 
-static const char* mm_get_custom_ai_id_value(uint32_t i) {
-    return game_ais[i]->name;
-}
-
 static const char* mm_get_custom_galaxy_seed_str(void) {
     static char buf[64];
     if (game_opt_custom.galaxy_seed == 0) {
@@ -358,7 +354,6 @@ static void main_menu_make_game_custom_page(struct main_menu_data_s *d)
 {
     d->set_item_dimensions = mm_custom_set_item_dimensions;
     menu_make_enum(menu_allocate_item(), "Difficulty", mm_get_custom_difficulty_value, &game_opt_custom.difficulty, 0, DIFFICULTY_NUM - 1, MOO_KEY_d);
-    menu_make_enum(menu_allocate_item(), "AI ID", mm_get_custom_ai_id_value, &game_opt_custom.ai_id, 0, GAME_AI_NUM - 1, MOO_KEY_a);
     menu_make_page(menu_allocate_item(), "Galaxy", MAIN_MENU_PAGE_GAME_CUSTOM_GALAXY, MOO_KEY_g);
     menu_make_page(menu_allocate_item(), "Homeworlds", MAIN_MENU_PAGE_GAME_CUSTOM_HOMEWORLDS, MOO_KEY_h);
     menu_make_back(menu_allocate_item());

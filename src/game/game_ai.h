@@ -11,7 +11,6 @@ struct audience_s;
 
 typedef enum {
     GAME_AI_CLASSIC = 0,
-    GAME_AI_CLASSICPLUS, /*1*/
     GAME_AI_NUM
 } game_ai_id_t;
 

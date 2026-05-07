@@ -160,9 +160,7 @@ void game_diplo_break_treaty(struct game_s *g, player_id_t breaker, player_id_t 
     if (eb->treaty[victim] == TREATY_ALLIANCE) {
         w = -20;
     }
-    if (g->ai_id != GAME_AI_CLASSIC) {
-        w = -w;
-    }
+    w = -w;
     if (eb->trait1 == TRAIT1_HONORABLE) {
         w *= 2;
     }
@@ -177,10 +175,6 @@ void game_diplo_break_treaty(struct game_s *g, player_id_t breaker, player_id_t 
     if (w != 0) {
         int v;
         eb->broken_treaty[victim] = eb->treaty[victim];
-        if (g->ai_id == GAME_AI_CLASSIC) {
-            /* WASBUG MOO1 blames both parties for breaking treaties */
-            ev->broken_treaty[breaker] = eb->treaty[victim];
-        }
         v = eb->relation1[victim] - rnd_1_n(20, &g->seed);
         SETMAX(v, -100);
         eb->relation1[victim] = v;
@@ -239,10 +233,7 @@ void game_diplo_start_war(struct game_s *g, player_id_t pi, player_id_t pi2)
 
 void game_diplo_start_war_swap(struct game_s *g, player_id_t pi, player_id_t pi2)
 {
-    if (g->ai_id != GAME_AI_CLASSIC) {
-        /* WASBUG? game_diplo_start_war is called in a few places using odd order of parameters */
-        player_id_t t = pi; pi = pi2; pi2 = t;
-    }
+    player_id_t t = pi; pi = pi2; pi2 = t;
     game_diplo_start_war(g, pi, pi2);
 }
 

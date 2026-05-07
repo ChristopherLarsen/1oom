@@ -1094,8 +1094,8 @@ int game_new(struct game_s *g, struct game_aux_s *gaux, struct game_new_options_
         g->galaxy_seed = opt->galaxy_seed;
     }
     g->seed = g->galaxy_seed;
-    g->ai_id = opt->ai_id;
-    game_ai = game_ais[g->ai_id];
+    g->ai_id = GAME_AI_CLASSIC;
+    game_ai = game_ais[GAME_AI_CLASSIC];
     g->players = opt->players;
     g->difficulty = opt->difficulty;
     g->galaxy_size = opt->galaxy_size;
@@ -1147,7 +1147,7 @@ int game_new(struct game_s *g, struct game_aux_s *gaux, struct game_new_options_
                 va += m;
             }
         }
-        log_message("Game: new game -new %u:0x%x:%u:0x%x:%u -nga %u\n", vo, vr, vb, g->galaxy_seed, va, g->ai_id);
+        log_message("Game: new game -new %u:0x%x:%u:0x%x:%u\n", vo, vr, vb, g->galaxy_seed, va);
     }
     game_generate_home_etc(g, opt);
     /* DRG-RNG-TRACE-3: seed after home+AI-init (new_game_init consumes RNG here). */

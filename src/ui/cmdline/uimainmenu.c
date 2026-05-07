@@ -120,7 +120,6 @@ static void ui_new_game_display(struct game_new_options_s *newopts)
         }
         putchar('\n');
     }
-    printf("%s: %s\n", game_str_ng_ai, game_ais[newopts->ai_id]->name);
     if (!have_human(newopts)) {
         puts(game_str_ng_allai);
     }
@@ -202,39 +201,12 @@ static int cmd_choose(struct game_s *g, int api, struct input_token_s *param, in
     return 0;
 }
 
-static int cmd_ai(struct game_s *g, int api, struct input_token_s *param, int num_param, void *var)
-{
-    struct input_list_s rl_in[] = {
-        { 0, "1", NULL, NULL },
-        { 1, "2", NULL, NULL },
-        { 2, "3", NULL, NULL },
-        { 3, "4", NULL, NULL },
-        { 4, "5", NULL, NULL },
-        { 5, "6", NULL, NULL },
-        { 0, NULL, NULL, NULL },
-        { 0, NULL, NULL, NULL }
-    };
-    struct game_new_options_s *newopts = (struct game_new_options_s *)g;
-    int num;
-    for (num = 0; num < GAME_AI_NUM; ++num) {
-        rl_in[num].value = num;
-        rl_in[num].display = game_ais[num]->name;
-    }
-    rl_in[num].value = 0;
-    rl_in[num].key = NULL;
-    rl_in[num].str = NULL;
-    rl_in[num].display = NULL;
-    newopts->ai_id = ui_input_list(game_str_ng_ai, "> ", rl_in);
-    return 0;
-}
-
 static bool ui_new_game_extra(struct game_new_options_s *newopts)
 {
     struct input_cmd_s cmds_newgame[] = {
         { "?", NULL, "Help", 0, 0, 0, ui_cmd_help, 0 },
         { "q", NULL, game_str_ng_cancel, 0, 0, 0, cmd_exit, (void *)1/*cancel*/ },
         { "s", NULL, game_str_ng_ok, 0, 0, 0, cmd_exit, (void *)2/*start*/ },
-        { "a", NULL, game_str_ng_ai, 0, 0, 0, cmd_ai, 0 },
         { "c", "[PLAYER]", game_str_ng_computer, 1, 1, 0, cmd_toggle_computer, 0 },
         { "r", "[PLAYER]", "Race", 1, 1, 0, cmd_race, 0 },
         { "b", "[PLAYER]", "Banner", 1, 1, 0, cmd_choose, ui_new_game_choose_banner },
