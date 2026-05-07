@@ -39,6 +39,7 @@ static bool game_opt_next_turn = false;
 static bool game_opt_save_quit = false;
 static const char *game_opt_ai_gate_path = 0;
 bool game_ai_gate_active = false;
+static int game_ai_gate_max_turns = 100;
 
 static struct game_end_s game_opt_end = { GAME_END_NONE, 0, 0, 0, 0 };
 static struct game_new_options_s game_opt_new = GAME_NEW_OPTS_DEFAULT;
@@ -77,6 +78,9 @@ static bool game_ai_gate_is_checkpoint_turn(int turn)
         if (game_ai_gate_turns[i] == turn) {
             return true;
         }
+    }
+    if (turn == game_ai_gate_max_turns) {
+        return true;
     }
     return false;
 }
@@ -130,12 +134,38 @@ static void game_ai_gate_write_meta(FILE *f, const struct game_s *g)
 {
     fprintf(
         f,
-        "\"meta\":{\"galaxy_seed\":%u,\"difficulty\":%d,\"galaxy_size\":%d,\"players\":%u,\"checkpoint_turns\":[1,5,20,50,100]}",
+        "\"meta\":{\"galaxy_seed\":%u,\"difficulty\":%d,\"galaxy_size\":%d,\"players\":%u,\"checkpoint_turns\":",
         g->galaxy_seed,
         g->difficulty,
         g->galaxy_size,
         g->players
     );
+    fputc('[', f);
+    bool first = true;
+    for (int i = 0; i < game_ai_gate_turns_num; ++i) {
+        int turn = game_ai_gate_turns[i];
+        if (turn <= game_ai_gate_max_turns) {
+            if (!first) {
+                fputc(',', f);
+            }
+            fprintf(f, "%d", turn);
+            first = false;
+        }
+    }
+    bool max_turn_is_base = false;
+    for (int i = 0; i < game_ai_gate_turns_num; ++i) {
+        if (game_ai_gate_turns[i] == game_ai_gate_max_turns) {
+            max_turn_is_base = true;
+            break;
+        }
+    }
+    if (game_ai_gate_max_turns > 0 && !max_turn_is_base) {
+        if (!first) {
+            fputc(',', f);
+        }
+        fprintf(f, "%d", game_ai_gate_max_turns);
+    }
+    fputs("]}", f);
 }
 
 static void game_ai_gate_write_empires(FILE *f, const struct game_s *g)
@@ -427,7 +457,7 @@ static int game_run_ai_gate(struct game_s *g, const char *path)
     fputc('{', f);
     game_ai_gate_write_meta(f, g);
     fputs(",\"checkpoints\":[", f);
-    for (int turn = 1; turn <= 100; ++turn) {
+    for (int turn = 1; turn <= game_ai_gate_max_turns; ++turn) {
         /* DRG-FIXTURE-PATCH 2026-04-28: write a yearsave at start-of-turn,
          * mirroring the UI loop's hook at
          * game.c:1202 which fires inside UI_TURN_ACT_NEXT_TURN BEFORE
@@ -836,6 +866,9 @@ const struct cmdline_options_s main_cmdline_options[] = {
     { "--ai-gate", 1,
       game_opt_set_ai_gate, (void *)&game_opt_ai_gate_path,
       "OUTFILE", "Run 100 AI-only turns and dump checkpoint JSON to OUTFILE" },
+    { "--ai-gate-turns", 1,
+      options_set_int_var, (void *)&game_ai_gate_max_turns,
+      "TURNS", "Set AI-gate turn horizon" },
     { 0, 0, 0, 0, 0, 0 }
 };
 
