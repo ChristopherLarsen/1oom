@@ -936,7 +936,19 @@ static int jump_starmap_enroute(struct game_s *g, const char *args)
 
 static int jump_starmap_reloc(struct game_s *g, const char *args)
 {
-    (void)args;
+    char buf[32];
+    if (jumpscreen_arg_get(args, "focus", buf, sizeof(buf))) {
+        int planet_i = atoi(buf);
+        if (planet_i < 0 || planet_i >= g->galaxy_stars) {
+            log_error("Jumpscreen: starmap_reloc focus=%d out of range 0..%d\n",
+                      planet_i, g->galaxy_stars - 1);
+            return 1;
+        }
+        g->planet_focus_i[g->active_player] = (uint8_t)planet_i;
+    }
+    if (args != NULL && strstr(args, "center=1") != NULL) {
+        ui_starmap_set_pos_focus(g, g->active_player);
+    }
     ui_starmap_reloc(g, g->active_player);
     return 0;
 }
