@@ -3596,7 +3596,7 @@ static void game_ai_classic_turn_diplo_p1_sub1(struct game_s *g)
     }
 }
 
-static int game_ai_classic_turn_diplo_p1_get_ai_trade_tech(struct game_s *g, player_id_t p1, player_id_t p2, tech_field_t *fieldptr, uint8_t *techptr)
+static int game_ai_classic_turn_diplo_p1_get_ai_trade_tech(struct game_s *g, player_id_t p1, player_id_t p2, tech_field_t *fieldptr, uint8_t *techptr, int *rptr, int counts[TECH_FIELD_NUM])
 {
     struct spy_esp_s s;
     tech_field_t field = 0;
@@ -3606,6 +3606,10 @@ static int game_ai_classic_turn_diplo_p1_get_ai_trade_tech(struct game_s *g, pla
     s.spy = p2;
     r = rnd_1_n(3, &g->seed);
     num = game_spy_esp_sub2(g, &s, r);
+    *rptr = r;
+    for (tech_field_t f = 0; f < TECH_FIELD_NUM; ++f) {
+        counts[f] = s.tbl_num[f];
+    }
     /* WASBUG
        MOO1 does field = s.tbl_field[0] and tech = s.tbl_tech2[0] but neither is set by game_spy_esp_sub2.
        MOO1 uses global variables for the tables; the values are from some previous spy call (possibly ground combat tech steal).
@@ -3643,6 +3647,18 @@ static void game_ai_classic_turn_diplo_p1(struct game_s *g)
             }
             if ((!(rnd_0_nm1(15 - g->difficulty * 2, &g->seed))) && BOOLVEC_IS1(e1->contact, p2)) {
                 int v;
+                const char *action = "none";
+                int trace_num0 = -1;
+                int trace_num1 = -1;
+                int trace_r0 = -1;
+                int trace_r1 = -1;
+                int trace_counts0[TECH_FIELD_NUM] = {-1, -1, -1, -1, -1, -1};
+                int trace_counts1[TECH_FIELD_NUM] = {-1, -1, -1, -1, -1, -1};
+                int trace_field0 = -1;
+                int trace_field1 = -1;
+                int trace_tech0 = -1;
+                int trace_tech1 = -1;
+                int treaty_before = e1->treaty[p2];
                 v = e1->trust[p2] + e1->relation1[p2] + game_diplo_tbl_reldiff[e2->trait1] + rnd_1_n(100, &g->seed);
                 if (e1->treaty[p2] == TREATY_NONAGGRESSION) {
                     v += 10;
@@ -3655,18 +3671,27 @@ static void game_ai_classic_turn_diplo_p1(struct game_s *g)
                 }
                 if (((v + e1->mood_treaty[p2]) > 150) && (e1->treaty[p2] != TREATY_ALLIANCE)) {
                     game_diplo_set_treaty(g, p1, p2, TREATY_ALLIANCE);
+                    action = "alliance";
                 } else if (((v + e1->mood_treaty[p2]) > 150) && (e1->treaty[p2] != TREATY_NONAGGRESSION)) { /* BUG ignores Alliance, results in NAP/Alliance oscillation */
                     game_diplo_set_treaty(g, p1, p2, TREATY_NONAGGRESSION);
+                    action = "nap";
                 } else {
                     if ((e1->mood_tech[p2] + 80) < v) {
                         tech_field_t field[2];
                         int num[2];
                         uint8_t tech[2];
-                        num[0] = game_ai_classic_turn_diplo_p1_get_ai_trade_tech(g, p1, p2, &field[0], &tech[0]);
-                        num[1] = game_ai_classic_turn_diplo_p1_get_ai_trade_tech(g, p2, p1, &field[1], &tech[1]);
+                        num[0] = game_ai_classic_turn_diplo_p1_get_ai_trade_tech(g, p1, p2, &field[0], &tech[0], &trace_r0, trace_counts0);
+                        trace_num0 = num[0];
+                        trace_field0 = field[0];
+                        trace_tech0 = tech[0];
+                        num[1] = game_ai_classic_turn_diplo_p1_get_ai_trade_tech(g, p2, p1, &field[1], &tech[1], &trace_r1, trace_counts1);
+                        trace_num1 = num[1];
+                        trace_field1 = field[1];
+                        trace_tech1 = tech[1];
                         if ((num[0] > 0) && (num[1] > 0)) {
                             game_tech_get_new(g, p2, field[0], tech[0], TECHSOURCE_TRADE, 0, PLAYER_NONE, false);
                             game_tech_get_new(g, p1, field[1], tech[1], TECHSOURCE_TRADE, 0, PLAYER_NONE, false);
+                            action = "tech";
                         }
                     } else if (v > 70) {
                         int v1, v2;
@@ -3675,8 +3700,14 @@ static void game_ai_classic_turn_diplo_p1(struct game_s *g)
                         SETMIN(v1, v2);
                         SETMIN(v1, 32000);
                         game_diplo_set_trade(g, p1, p2, v1);
+                        action = "trade";
                     }
                 }
+                LOG_EVENT(g->year, "ai_diplo_p1", "action=%s field0=%i field1=%i mood_tech=%i mood_treaty=%i num0=%i num1=%i n00=%i n01=%i n02=%i n03=%i n04=%i n05=%i n10=%i n11=%i n12=%i n13=%i n14=%i n15=%i p1=%i p2=%i r0=%i r1=%i seed=%u tech0=%i tech1=%i treaty_before=%i v=%i",
+                          action, trace_field0, trace_field1, e1->mood_tech[p2], e1->mood_treaty[p2], trace_num0, trace_num1,
+                          trace_counts0[0], trace_counts0[1], trace_counts0[2], trace_counts0[3], trace_counts0[4], trace_counts0[5],
+                          trace_counts1[0], trace_counts1[1], trace_counts1[2], trace_counts1[3], trace_counts1[4], trace_counts1[5],
+                          p1, p2, trace_r0, trace_r1, (unsigned)g->seed, trace_tech0, trace_tech1, treaty_before, v);
                 if (!(rnd_0_nm1(20, &g->seed))) {
                     game_diplo_act(g, rnd_1_n(5, &g->seed), p1, p2, 1, 0, 0);
                 }
