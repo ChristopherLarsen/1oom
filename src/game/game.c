@@ -628,6 +628,30 @@ static int game_run_ai_gate(struct game_s *g, const char *path)
              *         break;
              *     }
              */
+            /* DRG-FIXTURE-PATCH 2026-05-09 cycle 9D Option X-prime,
+             * end-state field reconciliation; cite seed-3 LOST_FUNERAL probe.
+             * In stock 1oom only the council-election path writes g->end
+             * (game_election.c:384 sets GAME_END_LOST_EXILE / WON_GOOD).
+             * GAME_END_WON_TYRANT (game_turn.c:1488) and GAME_END_LOST_FUNERAL
+             * (game_turn.c:1555 — guarded under our cycle-9A patch) only mutate
+             * the local `game_end` struct returned by game_turn_check_end and
+             * never touch g->end. The ai-gate JSON checkpoint writer at
+             * game.c:409-419 serializes g->end and gates winner emission on
+             * (g->end == 0) ? -1 : g->winner, so funeral/tyrant fixtures
+             * would surface as end=0 winner=-1 in the JSON even though the
+             * loop is breaking. Mirror the local terminal end_type into
+             * g->end here so per-fixture acceptance checks can see the
+             * actual end_type. The loop breaks immediately after, so this
+             * mutation does not leak into any further turn processing.
+             * g->winner is intentionally NOT mutated for tyrant/funeral
+             * (the surviving-empire pi1 lives inside game_turn_check_end's
+             * inner scope and reaching for it here is faithfulness creep).
+             * For tyrant/funeral fixtures, disambiguate the winner from the
+             * empires[] array's alive[] / planet_count[] cells.
+             */
+            if (g->end == GAME_END_NONE) {
+                g->end = game_end.type;
+            }
             if (last_written_turn != turn) {
                 if (!first_checkpoint) {
                     fputc(',', f);
