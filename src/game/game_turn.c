@@ -851,7 +851,22 @@ static void game_turn_move_ships(struct game_s *g)
     }
     for (g->active_player = 0; g->active_player < g->players; ++g->active_player) {
         bool flag_more;
-        if (BOOLVEC_IS1(g->is_ai, g->active_player)) {
+        /* DRG-FIXTURE-PATCH 2026-05-09 cycle 9B, fleet-movement under ai-gate;
+         * cite cycle-9A diagnosis: game_turn.c:852-855 short-circuits movement,
+         * blocking colonization arrival check at :952-972. Original guard:
+         *     if (BOOLVEC_IS1(g->is_ai, g->active_player)) { continue; }
+         * Under --ai-gate every player has is_ai SET1 (game.c:456-458), so
+         * the per-player movement frames at :866-948 (which advance r->x,r->y
+         * for both g->enroute fleets and g->transport rows toward p->x,p->y)
+         * never run. Then :952-972 sees no fleet at its dest and never
+         * promotes ships into eto[].orbit[], starving game_turn_explore
+         * at :1015-1019 of flag_visible and the colonize block at :1077-1093
+         * never fires. Extend the guard with !game_ai_gate_active so that
+         * under ai-gate the AI players' movement frames execute, allowing
+         * fleets and transports to actually arrive. The same outer loop at
+         * :852 covers BOTH enroute (:872-899) AND transports (:900-927), so
+         * patching the single guard restores both arrival paths simultaneously. */
+        if (BOOLVEC_IS1(g->is_ai, g->active_player) && !game_ai_gate_active) {
             continue;
         }
         if (move_back) {
@@ -947,6 +962,24 @@ static void game_turn_move_ships(struct game_s *g)
             ui_gmap_basic_finish_frame(ctx, g->active_player);
         }
         move_back = local_multiplayer;
+        /* DRG-FIXTURE-PATCH 2026-05-09 cycle 9B (ai-gate multi-step guard);
+         * cite game_aux.c:174-185 (local_players == count of !is_ai slots) and
+         * game_turn.c:844 (local_multiplayer = local_players > 1, move_back
+         * stays false under ai-gate because every slot is is_ai => local_players
+         * == 0 => local_multiplayer == false). The outer loop at :852 exists
+         * to drive UI for hot-seat humans: each iteration restores the enroute
+         * /transport arrays from g->gaux->move_temp via move_back so each human
+         * sees the same frames. Without that restore, repeating the inner
+         * frames per AI player would step the same in-flight fleets/transports
+         * N times per turn (util_math_go_line_dist clamps at dest, so arrived
+         * fleets are idempotent, but in-flight ones N-fold their speed). Under
+         * ai-gate we run the movement frames exactly once and break; this
+         * matches stock 1oom semantics for a single-human game (where the loop
+         * naturally executes once for the lone human) and preserves correct
+         * per-turn movement distance for the corpus. */
+        if (game_ai_gate_active) {
+            break;
+        }
     }
     ui_gmap_basic_shutdown(ctx);
     for (int i = 0; i < g->enroute_num; ++i) {
@@ -1457,24 +1490,71 @@ static bool game_turn_check_end(struct game_s *g, struct game_end_s *ge)
             ge->race = g->eto[pi1].race;
             return true;
         }
-        if (!human_alive) {
-            if (game_ai_gate_active) {
-                return false;
-            }
+        /* DRG-FIXTURE-PATCH 2026-05-09 cycle 9A, t250_lost_5p reachability;
+         * cite Christopher decision cycle-8 triage. Original 1oom code
+         * (preserved below in comment) suppressed GAME_END_LOST_FUNERAL
+         * whenever game_ai_gate_active is true, which made the
+         * t250_lost_5p fixture structurally unreachable from any
+         * --ai-gate run (every player is AI inside ai-gate per
+         * game.c:456-458, so the IS_HUMAN check at game.h:332-340
+         * — BOOLVEC_IS0(g->is_ai, i) — is false for every slot,
+         * `human_alive` is structurally false every turn, and the
+         * original guard short-circuited the funeral path).
+         * Of the three triage options (1: drop fixture, 2: curate
+         * pre-funeral, 3: patch ai-gate), Christopher chose option 3
+         * to keep the corpus complete; we already accept ai-gate
+         * behavioral divergences elsewhere (cheat_galaxy at game.c:481,
+         * have_colony_for/fuel_range/ship_special clamps at
+         * game.c:486-506,531-602).
+         *
+         * Naive removal of the guard is unsafe for two reasons:
+         *   (1) `human_alive` is always false under ai-gate, so the
+         *       branch would fire on turn 1 (regardless of whether the
+         *       conceptual human is actually dead).
+         *   (2) `pih` is PLAYER_NONE under ai-gate (the loop at
+         *       :1401-1406 only sets pih for IS_HUMAN slots), so the
+         *       g->eto[pih].race and ge->banner_dead = pih downstream
+         *       dereference garbage and segfault.
+         * Fix: under ai-gate, treat slot 0 as the conceptual human
+         * (matches game.c:447-454 where orig_is_ai snapshots the
+         * pre-force-AI bitmask and slot 0 is the user's intended human
+         * for fixture purposes). Only fire the funeral when slot 0 is
+         * actually extinct (IS_ALIVE checks g->evn.home[i] !=
+         * PLANET_NONE per game.h:342-345, which is orthogonal to
+         * is_ai). Substitute pih=PLAYER_0 for the funeral payload.
+         *
+         * Original suppression preserved for history:
+         *     if (!human_alive) {
+         *         if (game_ai_gate_active) {
+         *             return false;
+         *         }
+         *         ... funeral ...
+         *     }
+         */
+        bool funeral_fire = !human_alive;
+        player_id_t funeral_pih = pih;
+        if (game_ai_gate_active) {
+            /* Override the IS_HUMAN-based human_alive: under ai-gate,
+             * slot 0 is the conceptual human even though is_ai is
+             * forced true everywhere. */
+            funeral_fire = !IS_ALIVE(g, PLAYER_0);
+            funeral_pih = PLAYER_0;
+        }
+        if (funeral_fire) {
             struct news_s ns;
             int killer = g->gaux->human_killer;
             if (killer >= g->players) {
                 killer = (pi1 != PLAYER_NONE) ? pi1 : 1;
             }
             ns.type = GAME_NEWS_GENOCIDE;
-            ns.race = g->eto[pih].race;
+            ns.race = g->eto[funeral_pih].race;
             ns.subtype = 3;
-            ns.num1 = pih;
+            ns.num1 = funeral_pih;
             ui_news_start();
             ui_news(g, &ns);
             ge->type = GAME_END_LOST_FUNERAL;
             ge->race = g->eto[killer].banner;
-            ge->banner_dead = pih;
+            ge->banner_dead = funeral_pih;
             return true;
         }
     }

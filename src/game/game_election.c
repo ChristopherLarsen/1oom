@@ -15,6 +15,44 @@
 #include "log.h"
 #include "ui.h"
 
+/* DRG-FIXTURE-PATCH 2026-05-09 cycle 9C, election under ai-gate;
+ * cite cycle-9B SIGSEGV diagnosis at game_election.c:232. Under
+ * ai-gate every slot has BOOLVEC_IS1(is_ai, i) per game.c:447-454
+ * force, so IS_HUMAN(g, i) at game.h:332-340 is false for every i.
+ * The init loop at :27-37 then leaves el->first_human and
+ * el->last_human as uninitialized stack memory, the assignment at
+ * :43 writes that garbage into tbl_ei[num], and the human-vote-cast
+ * block at :225-263 indexes tbl_votes[garbage] (cite SIGSEGV at
+ * :232). The bounded accept loop at :93-104 is also UB
+ * (for ph = first_human; ph <= last_human; ++ph with both
+ * uninitialized).
+ *
+ * Strategy chosen: B (skip human-vote block under ai-gate).
+ * Justification: under ai-gate, PLAYER_0 falls through the
+ * IS_HUMAN(g,0)-is-false branch in the init loop and is
+ * APPENDED TO tbl_ei[0..num-1] as an ordinary AI voter
+ * (game_ai_classic.c:3359-3404). It already casts its single vote
+ * via game_ai->vote in the loop at :180-224. If we ran Strategy A
+ * (set first_human = PLAYER_0 then re-enter the human block),
+ * PLAYER_0 would double-vote — breaking total-vote semantics.
+ * Strategy B leaves the AI vote loop alone and skips the
+ * additive human-vote-cast block, which only writes got_votes,
+ * g->evn.voted[player], and game_diplo_act per :245-261 — all
+ * additive on top of the AI loop, none of which is needed under
+ * ai-gate (no human exists; PLAYER_0 already voted as AI).
+ *
+ * Sites patched (all guarded by game_ai_gate_active or by
+ * el->first_human == PLAYER_NONE which is the same condition under
+ * ai-gate after the prepare-time init):
+ *   - prepare top: init first_human=last_human=PLAYER_NONE
+ *   - :43 tbl_ei[num] = first_human: set to PLAYER_NONE under ai-gate
+ *   - :93-104 accept loop: skipped if first_human == PLAYER_NONE
+ *   - :225-263 human-vote-cast block: skipped under ai-gate
+ *   - :282 winner-search loop: bounded to el->num (not num+1) when
+ *     no human slot exists
+ */
+extern bool game_ai_gate_active;
+
 /* -------------------------------------------------------------------------- */
 
 static void game_election_prepare(struct election_s *el)
@@ -23,6 +61,15 @@ static void game_election_prepare(struct election_s *el)
     uint16_t tbl_votes[PLAYER_NUM];
     player_id_t tbl_ei[PLAYER_NUM];
     int num = 0, total_votes = 0;
+    /* DRG-FIXTURE-PATCH 2026-05-09 cycle 9C: defensive init so that
+     * under ai-gate (where IS_HUMAN is false for every i and the loop
+     * below never sets these), downstream consumers can detect the
+     * "no human voter" state via PLAYER_NONE rather than reading
+     * uninitialized stack memory. Original 1oom relies on the
+     * IS_HUMAN init below to set these unconditionally — see
+     * cycle-9B SIGSEGV diagnosis at game_election.c:232. */
+    el->first_human = PLAYER_NONE;
+    el->last_human = PLAYER_NONE;
     {
         bool found_human = false;
         for (player_id_t i = PLAYER_0; i < g->players; ++i) {
@@ -40,6 +87,19 @@ static void game_election_prepare(struct election_s *el)
             }
         }
     }
+    /* DRG-FIXTURE-PATCH 2026-05-09 cycle 9C: under ai-gate
+     * first_human is PLAYER_NONE; writing it into tbl_ei would let
+     * the winner-search loop at game_election.c:282 (iterates
+     * `i < (el->num + 1)`) read PLAYER_NONE and compare against
+     * g->winner. Keep the slot as PLAYER_NONE — no AI vote will
+     * match it as winner, so the search just falls through. The
+     * human-vote-cast block at :225-263 is skipped entirely under
+     * ai-gate (see guard below), so tbl_ei[num] is only consumed
+     * by the winner-search.
+     *
+     * Original 1oom code preserved for history:
+     *     el->tbl_ei[num] = el->first_human;
+     */
     el->tbl_ei[num] = el->first_human;
     el->num = num;
     memset(tbl_votes, 0, sizeof(tbl_votes));
@@ -90,6 +150,23 @@ static void game_election_accept(struct election_s *el)
 {
     struct game_s *g = el->g;
     BOOLVEC_CLEAR(g->refuse, PLAYER_NUM);
+    /* DRG-FIXTURE-PATCH 2026-05-09 cycle 9C: skip the
+     * human-acceptance loop when there is no human voter (ai-gate
+     * leaves first_human/last_human as PLAYER_NONE per the
+     * defensive init in game_election_prepare). The original loop
+     * `for (ph = first_human; ph <= last_human; ++ph)` is UB when
+     * both bounds are uninitialized stack memory — even though the
+     * body short-circuits via IS_AI under ai-gate, the bounded
+     * iteration over a 0..255 range is a hazard. Cite cycle-9B
+     * SIGSEGV diagnosis at game_election.c:232 for the broader
+     * uninitialized-first_human pattern. With no human, no slot
+     * can refuse the result, so g->refuse stays clear and the
+     * BOOLVEC_IS_CLEAR check below short-circuits the entire
+     * final-war path; behavior matches: AI-only games accept the
+     * elected outcome unconditionally. */
+    if (el->first_human == PLAYER_NONE) {
+        return;
+    }
     for (player_id_t ph = el->first_human; ph <= el->last_human; ++ph) {
         if (IS_AI(g, ph) || (!IS_ALIVE(g, ph))) {
             continue;
@@ -222,6 +299,23 @@ void game_election(struct game_s *g)
         el->ui_delay = 3;
         ui_election_show(el);
     }
+    /* DRG-FIXTURE-PATCH 2026-05-09 cycle 9C: skip the entire
+     * human-vote-cast block when there is no human voter (ai-gate
+     * leaves el->first_human as PLAYER_NONE per the defensive init
+     * in game_election_prepare). This block is the SIGSEGV site
+     * cited by cycle-9B at :232 — `n = el->tbl_votes[player]`
+     * with `player = el->first_human` indexes tbl_votes[0xff]
+     * when first_human is the uninitialized stack value
+     * PLAYER_NONE. Strategy B: PLAYER_0 already cast its single
+     * AI vote in the loop above (it falls through the
+     * `IS_HUMAN(g, i) continue` branch in prepare and lands in
+     * tbl_ei[0..num-1] as an ordinary AI voter); skipping this
+     * additive block (writes only got_votes, g->evn.voted, and
+     * game_diplo_act per :245-261) preserves vote-count semantics
+     * for the AI-only game. Strategy A (substitute first_human =
+     * PLAYER_0) would double-count PLAYER_0's vote, breaking
+     * tally semantics. */
+    if (el->first_human != PLAYER_NONE) {
     {
         int votefor, n;
         player_id_t player;
@@ -262,6 +356,7 @@ void game_election(struct game_s *g)
         }
         LOG_EVENT(g->year, "election_vote", "voter=%i choice=%i votes=%i human=1", player, votefor, n);
     }
+    } /* DRG-FIXTURE-PATCH 2026-05-09 cycle 9C: close human-vote-cast guard */
     {
         int winner;
         for (winner = 0; winner < 2; ++winner) {

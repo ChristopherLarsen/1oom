@@ -406,7 +406,7 @@ static void game_ai_gate_write_checkpoint(FILE *f, const struct game_s *g, int t
 {
     fprintf(
         f,
-        "{\"turn\":%d,\"year\":%u,\"rng_seed\":%u,\"rng_call_count\":%u,\"end\":%d,\"winner\":%d,",
+        "{\"turn\":%d,\"year\":%u,\"rng_seed\":%u,\"rng_call_count\":%u,\"end\":%d,\"winner\":%d,\"election_held\":%d,",
         turn,
         g->year + YEAR_BASE,
         g->seed,
@@ -416,7 +416,12 @@ static void game_ai_gate_write_checkpoint(FILE *f, const struct game_s *g, int t
          * convention. 1oom's g->winner is meaningless until g->end != 0 (production code
          * uses g->end as the "game over" flag). Mirrors the eta-dump fix at game.c:297.
          * Production gameplay untouched. */
-        ((g->end == 0) ? -1 : g->winner)
+        ((g->end == 0) ? -1 : g->winner),
+        /* DRG-FIXTURE-PATCH 2026-05-09 cycle 8A, HL-M4: emit g->election_held
+         * (game.h:304) so HL-M3 verification can see whether the council
+         * election has fired. One-shot bool set at game_turn.c:1835 once
+         * threshold (galaxy_stars * 2) / 3 is met. */
+        (g->election_held ? 1 : 0)
     );
     game_ai_gate_write_empires(f, g);
     fputc(',', f);
@@ -453,6 +458,53 @@ static int game_run_ai_gate(struct game_s *g, const char *path)
     }
 
     game_ai_gate_active = true;
+
+    /* DRG-FIXTURE-PATCH 2026-05-09 (cycle 7A, HL-M2 unblock Option B):
+     * enable flag_cheat_galaxy for the duration of the ai-gate run so the
+     * AI's scanner_range is set to 30 (game_tech.c:583-584) and downstream
+     * within_range / visibility tables reflect that. Without this, every
+     * AI empire sees only its own homeworld at game start (5-probe matrix
+     * in audits/_status.md cycle-6 section), so scout dispatch
+     * (game_ai_classic.c:156-186) never finds reachable unexplored planets,
+     * colonization never happens, and election (game_turn.c:1826-1836) +
+     * end-state never fire. Mirrors the canonical setter pattern from
+     * game_cheat.c:14-23 (flag flip + tech_util + within_range + visibility
+     * refresh) but DELIBERATELY OMITS the per-planet `explored` SET1 loop:
+     * scout dispatch at game_ai_classic.c:179 SKIPS already-explored
+     * planets, so flooding `explored` would re-break scouting. game_stop
+     * at game.c:512-521 already resets flag_cheat_galaxy to false so this
+     * does not leak into non-ai-gate runs.
+     * RNG-determinism caveat: the cheat changes AI decisions, so existing
+     * cycle-6 turn-N fixtures and the simdiff golden corpus are now stale
+     * and must be regenerated in cycle 7C/8.
+     */
+    g->gaux->flag_cheat_galaxy = true;
+    game_update_tech_util(g);
+    game_update_within_range(g);
+    game_update_visibility(g);
+
+    /* DRG-FIXTURE-PATCH 2026-05-09 cycle 8A, HL-M3 (Option B-prime):
+     * AI empires under --ai-gate start with e->have_colony_for =
+     * PLANET_TYPE_MINIMAL (game_new.c:865) and never advance the
+     * planetology tech that lowers it (the human-played UI flow is
+     * bypassed). game_ai_classic.c:201 / :688 / :948 require
+     * (p->type >= e->have_colony_for) before colonization, so empires
+     * plateau at 4-5 colonies and the council-election threshold of
+     * (galaxy_stars * 2) / 3 (game_turn.c:1831) is never met. Force
+     * have_colony_for to PLANET_TYPE_RADIATED (=1, game_planet.h:10) for
+     * every empire, mirroring the Silicoid permanence at
+     * game_tech.c:431-433. RADIATED is the most permissive non-zero
+     * value, so any planet with type >= 1 (everything except
+     * PLANET_TYPE_NOT_HABITABLE) becomes colonizable. All slots are
+     * AI inside ai-gate (loop at game.c:451-453), so iterate all
+     * g->players unconditionally; this matches the cycle-7A intent of
+     * "fixture build, not balance". RNG-determinism caveat: this changes
+     * AI decisions just like the cheat-galaxy flip, so cycle-7A
+     * post-turn-1 fixtures are doubly stale. */
+    for (player_id_t i = PLAYER_0; i < g->players; ++i) {
+        g->eto[i].have_colony_for = PLANET_TYPE_RADIATED;
+    }
+
     rnd_reset_call_count();
     fputc('{', f);
     game_ai_gate_write_meta(f, g);
@@ -476,6 +528,66 @@ static int game_run_ai_gate(struct game_s *g, const char *path)
         }
         game_end = game_turn_process(g);
         g->active_player = PLAYER_0;
+        /* DRG-FIXTURE-PATCH 2026-05-09 cycle 8A, HL-M3 (per-turn reapply):
+         * game_turn_process calls game_tech_research -> game_update_tech_util
+         * (game_turn.c:1766,1873; game_tech.c:425) which re-derives
+         * have_colony_for from completed tech, blowing away the pre-turn-1
+         * override above. Re-apply the RADIATED clamp every turn so AI
+         * empires can colonize hostile planets and reach the
+         * (galaxy_stars * 2) / 3 council-election threshold
+         * (game_turn.c:1831).
+         *
+         * DRG-FIXTURE-PATCH 2026-05-09 cycle 9A, HL-M3 fuel_range +
+         * ship_special bundle:
+         *   (a) fuel_range clamp to 30. game_tech.c:557-559 sets starting
+         *       fuel_range=3 from TECH_FIELD_PROPULSION research; under
+         *       --ai-gate empires never advance propulsion enough so
+         *       fuel_range stays at 3. game_misc.c:362-376 require
+         *       mindist <= e->fuel_range before within_frange[pi]==1, and
+         *       game_ai_classic.c:591/:633 require within_frange[pi]==1
+         *       before send_colony_ships will dispatch. 30 matches the
+         *       Hyperspace Comm tech bump (per the comment at game.h:146)
+         *       and unblocks colonization beyond the homeworld system.
+         *   (b) ship_special colony-base promotion. shipi_colony is
+         *       recomputed every turn at game_ai_classic.c:1708-1721, and
+         *       send_colony_ships at game_ai_classic.c:599-622 derives
+         *       can_colonize from the lowest-numbered colony-base special
+         *       (line 605: can_colonize = MINIMAL - (s - STANDARD_BASE)).
+         *       Starting design at game_shipdesign.c:49 has
+         *       SHIP_SPECIAL_STANDARD_COLONY_BASE (=2,
+         *       game_shiptech.h:156), giving can_colonize = MINIMAL (=7,
+         *       game_planet.h:16) — only DESERT(8)..TERRAN(d) qualify.
+         *       Promote any STANDARD slot to RADIATED (=8,
+         *       game_shiptech.h:162) so can_colonize collapses to
+         *       PLANET_TYPE_RADIATED and every habitable planet (type>=1)
+         *       passes the p->type >= can_colonize check at line 618.
+         *       Walk g->srd[pi].design[shipi_colony].special[0..SPECIAL_SLOT_NUM]
+         *       (NUM_SHIPDESIGNS=6, SPECIAL_SLOT_NUM=3 per
+         *       game_types.h:192 + game_shipdesign.h:12). Skip the
+         *       SHIP_INDEX_NONE sentinel (-1, game.h:154 int8_t).
+         *       Other specials are left untouched.
+         *   Both (a) and (b) reapply per-turn for the same reason as the
+         *   have_colony_for clamp above: game_ai_classic.c:1708 rewrites
+         *   shipi_colony every turn and game_tech_research can mutate
+         *   fuel_range. RNG-determinism caveat: same as cycle-7A/8A —
+         *   any pre-cycle-9A ai-gate-derived fixtures are doubly stale. */
+        for (player_id_t pi = PLAYER_0; pi < g->players; ++pi) {
+            g->eto[pi].have_colony_for = PLANET_TYPE_RADIATED;
+            if (g->eto[pi].fuel_range < 30) {
+                g->eto[pi].fuel_range = 30;
+            }
+            {
+                int8_t si = g->eto[pi].shipi_colony;
+                if (si >= 0 && si < NUM_SHIPDESIGNS) {
+                    shipdesign_t *sd = &(g->srd[pi].design[si]);
+                    for (int j = 0; j < SPECIAL_SLOT_NUM; ++j) {
+                        if (sd->special[j] == SHIP_SPECIAL_STANDARD_COLONY_BASE) {
+                            sd->special[j] = SHIP_SPECIAL_RADIATED_COLONY_BASE;
+                        }
+                    }
+                }
+            }
+        }
         if (game_ai_gate_is_checkpoint_turn(turn)) {
             if (!first_checkpoint) {
                 fputc(',', f);
