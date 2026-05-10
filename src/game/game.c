@@ -438,6 +438,19 @@ static int game_run_ai_gate(struct game_s *g, const char *path)
     struct game_end_s game_end = { GAME_END_NONE, 0, 0, 0, 0 };
     FILE *f = fopen(path, "w");
     bool first_checkpoint = true;
+    /* DRG-FIXTURE-PATCH 2026-05-09 cycle 9D Option X, end-state-triggered
+     * checkpoint; cite cycle-9C diagnosis: emit loop misses post-end state
+     * when end fires between cadence checkpoints. Cadence array at
+     * game.c:57 is { 1, 5, 6, 7, 8, 9, 10, 12, 15, 16, 17, 18, 20, 50, 100 }
+     * plus the implicit max_turns at game.c:82-84. Cycle 9C measured
+     * end-state firing at year 2474 (turn 174) on seed 510:0:0:42:1 with
+     * --ai-gate-turns 400 — between turn-100 cadence and turn-400 max,
+     * so the JSON never serialized post-end g.end / g.winner. last_written_turn
+     * tracks the most recent checkpoint write so the end-state guard below
+     * (immediately before the break at game.c:~601) does not double-write
+     * if end fires on a cadence turn.
+     */
+    int last_written_turn = 0;
 
     if (!f) {
         log_error("Game: could not open ai gate output '%s'\n", path);
@@ -594,8 +607,35 @@ static int game_run_ai_gate(struct game_s *g, const char *path)
             }
             first_checkpoint = false;
             game_ai_gate_write_checkpoint(f, g, turn);
+            last_written_turn = turn;
         }
         if ((game_end.type != GAME_END_NONE) && (game_end.type != GAME_END_FINAL_WAR)) {
+            /* DRG-FIXTURE-PATCH 2026-05-09 cycle 9D Option X,
+             * end-state-triggered checkpoint; cite cycle-9C diagnosis:
+             * the cadence array misses the actual end-state turn (e.g.
+             * turn 174 on seed 510:0:0:42:1). Without this write the
+             * post-end g.end / g.winner / g.election_held state is never
+             * serialized to JSON and per-fixture acceptance checks
+             * cannot verify it. Guarded by last_written_turn so a turn
+             * that is BOTH a cadence-checkpoint AND the end-state turn
+             * (e.g. unlikely but possible turn 100) is not written
+             * twice. The checkpoint writer at game.c:405-... is not
+             * idempotent w.r.t. JSON-array comma placement, so we
+             * reuse the same first_checkpoint comma machinery.
+             *
+             * Original 1oom code (preserved here for cite):
+             *     if ((game_end.type != GAME_END_NONE) && (game_end.type != GAME_END_FINAL_WAR)) {
+             *         break;
+             *     }
+             */
+            if (last_written_turn != turn) {
+                if (!first_checkpoint) {
+                    fputc(',', f);
+                }
+                first_checkpoint = false;
+                game_ai_gate_write_checkpoint(f, g, turn);
+                last_written_turn = turn;
+            }
             break;
         }
     }
