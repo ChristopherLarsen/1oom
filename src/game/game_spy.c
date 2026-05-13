@@ -286,6 +286,8 @@ static void game_spy_sabotage(struct game_s *g, player_id_t spy, player_id_t tar
     pl = game_planet_get_random(g, target); /* WASBUG? used a function that returned 0 on no planets */
     if ((v8 > 0) && (pl != PLANET_NONE)) {
         planet_t *p = &(g->planet[pl]);
+        int before_factories = p->factories;
+        int before_bases = p->missile_bases;
         g->evn.sabotage_spy[target][spy] = rcaught ? spy : PLAYER_NONE;
         if (IS_HUMAN(g, spy)) {
             /*82431*/
@@ -346,6 +348,10 @@ static void game_spy_sabotage(struct game_s *g, player_id_t spy, player_id_t tar
                 }
             }
         }
+        LOG_EVENT(g->year, "spy_sabotage", "bases=%i bases_from=%i bases_to=%u caught=%i damage=%i fact_from=%i fact_to=%u frame=%i planet=%i seed=%u spy=%i target=%i",
+                  flag_bases ? 1 : 0, before_bases, p->missile_bases, rcaught, v8,
+                  before_factories, p->factories, flag_frame ? 1 : 0, pl, (unsigned)g->seed,
+                  (int)spy, (int)target);
     }
 }
 

@@ -201,6 +201,9 @@ void game_turn_bomb(struct game_s *g)
                     if (p->pop == 0) {
                         game_planet_destroy(g, pli, i);
                     }
+                    LOG_EVENT(g->year, "combat_bomb", "attacker=%i bio=%i defender=%i fact_destroyed=%i fact_to=%u id=%u pop_killed=%i pop_to=%u seed=%u",
+                              i, biodmg, owner, factdmg, p->factories, pli,
+                              popdmg, p->pop, (unsigned)g->seed);
                     if (IS_HUMAN(g, i) || IS_HUMAN(g, owner)) {
                         player_id_t human;
                         bool hide_other;

@@ -330,6 +330,13 @@ const uint8_t *game_turn_ground_resolve_all(struct game_s *g)
                         if (gr->s[0].human || gr->s[1].human) {
                             pos = game_ground_encode_end(gr, buf, pos);
                         }
+                        LOG_EVENT(g->year, "combat_ground", "att_force=%i att_loss=%i att_start=%i attacker=%i def_force=%i def_loss=%i def_start=%i defender=%i id=%u seed=%u total_inbound=%i won=%s",
+                                  gr->s[0].force, gr->inbound - gr->s[0].pop1,
+                                  gr->inbound, gr->s[0].player, gr->s[1].force,
+                                  pop_planet - gr->s[1].pop1, pop_planet,
+                                  gr->s[1].player, pli, (unsigned)g->seed,
+                                  gr->total_inbound,
+                                  (p->owner == gr->s[0].player) ? "true" : "false");
                         pop_planet -= gr->s[1].pop1;
                         SETMAX(pop_planet, 1);
                         game_ai->ground(g, gr->s[1].player, gr->s[0].player, pli, pop_planet, (p->owner != powner));
