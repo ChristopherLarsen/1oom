@@ -1035,6 +1035,22 @@ void game_audience(struct game_s *g, player_id_t ph, player_id_t pa)
     struct audience_s au[1];
     empiretechorbit_t *eh = &(g->eto[ph]);
     au->g = g;
+    /* Human-gate diagnostic fixture: replace one already-scheduled audience.
+     * No RNG draws or simulation implementation; the stock audience/newtech
+     * and remaining turn pipeline execute normally. Opt-in year:pa:field:tech. */
+    const char *fixture = getenv("MOO_HUMAN_GATE_TECH_TRADE");
+    int fixture_year, fixture_pa, fixture_field, fixture_tech;
+    if (fixture && ph == PLAYER_0 &&
+        sscanf(fixture, "%d:%d:%d:%d", &fixture_year, &fixture_pa, &fixture_field, &fixture_tech) == 4 &&
+        fixture_year == g->year && fixture_pa == pa &&
+        fixture_field >= 0 && fixture_field < TECH_FIELD_NUM && fixture_tech > 0 && fixture_tech <= 50) {
+        eh->diplo_type[pa] = 29;
+        eh->au_tech_trade_num[pa] = 1;
+        eh->au_tech_trade_field[pa][0] = fixture_field;
+        eh->au_tech_trade_tech[pa][0] = fixture_tech;
+        eh->au_want_field[pa] = 0;
+        eh->au_want_tech[pa] = 0;
+    }
     game_diplo_limit_mood_treaty(g);
     game_audience_prepare(au, ph, pa);
     ui_audience_start(au);
