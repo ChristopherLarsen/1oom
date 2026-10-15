@@ -1,0 +1,555 @@
+human-gate.patch -- DRG-HUMAN-GATE diagnostic export for tools/human_run (cleanroom oracle only).
+Regenerated 2026-10-15 against 1oom HEAD 6d933ba2 with:
+  git -C 1oom diff --no-color HEAD -- src/game/game.c src/ui/cmdline/uiinput.c src/ui/cmdline/uiinput.h src/ui/cmdline/uinewtech.c src/ui/cmdline/uiaudience.c src/ui/cmdline/uibattle.c src/ui/cmdline/uiground.c src/rnd.c src/rnd.h
+Includes the ai-gate checkpoint exporter fields the human-gate JSONL reuses
+(spies/spymode/spyfund/spying, security, tax, max_pop1-3, explored,
+within_frange, crystal/amoeba events). uiground.c: display-only replay
+draws do not advance the RNG call counter (rnd_set_call_count). Applies cleanly to a clean HEAD.
+
+diff --git a/src/game/game.c b/src/game/game.c
+index 25ad841e..bac0c6cb 100644
+--- a/src/game/game.c
++++ b/src/game/game.c
+@@ -40,6 +40,15 @@ static bool game_opt_save_quit = false;
+ static const char *game_opt_ai_gate_path = 0;
+ bool game_ai_gate_active = false;
+ static int game_ai_gate_max_turns = 100;
++/* DRG-HUMAN-GATE 2026-09-29 (docs/dogfood-plan.md Phase 3): diagnostic
++ * export for human-seat oracle runs. Stock rules; slot 0 stays human and is
++ * driven through the cmdline UI from stdin. One JSON checkpoint per line
++ * (JSONL) is flushed after every game_turn_process so output survives the
++ * cmdline UI's exit(0) on end of input. */
++static const char *game_opt_human_gate_path = 0;
++static int game_human_gate_max_turns = 100;
++static FILE *game_human_gate_f = NULL;
++static int game_human_gate_turn = 0;
+ 
+ static struct game_end_s game_opt_end = { GAME_END_NONE, 0, 0, 0, 0 };
+ static struct game_new_options_s game_opt_new = GAME_NEW_OPTS_DEFAULT;
+@@ -184,6 +193,10 @@ static void game_ai_gate_write_empires(FILE *f, const struct game_s *g)
+         int tech_project[TECH_FIELD_NUM];
+         int treaties[PLAYER_NUM];
+         int trade_bc[PLAYER_NUM];
++        int spies[PLAYER_NUM];
++        int spymode[PLAYER_NUM];
++        int spyfund[PLAYER_NUM];
++        int spying[PLAYER_NUM];
+         const empiretechorbit_t *e = &(g->eto[pi]);
+         const techdata_t *tech = &(e->tech);
+ 
+@@ -217,6 +230,10 @@ static void game_ai_gate_write_empires(FILE *f, const struct game_s *g)
+         for (int other = 0; other < g->players; ++other) {
+             treaties[other] = e->treaty[other];
+             trade_bc[other] = e->trade_bc[other];
++            spies[other] = e->spies[other];
++            spymode[other] = e->spymode[other];
++            spyfund[other] = e->spyfund[other];
++            spying[other] = e->spying[other];
+         }
+ 
+         if (pi != PLAYER_0) {
+@@ -246,6 +263,15 @@ static void game_ai_gate_write_empires(FILE *f, const struct game_s *g)
+         game_ai_gate_write_int_array(f, tech_completed, TECH_FIELD_NUM);
+         fputs(",\"tech_project\":", f);
+         game_ai_gate_write_int_array(f, tech_project, TECH_FIELD_NUM);
++        fputs(",\"spies\":", f);
++        game_ai_gate_write_int_array(f, spies, g->players);
++        fputs(",\"spymode\":", f);
++        game_ai_gate_write_int_array(f, spymode, g->players);
++        fputs(",\"spyfund\":", f);
++        game_ai_gate_write_int_array(f, spyfund, g->players);
++        fputs(",\"spying\":", f);
++        game_ai_gate_write_int_array(f, spying, g->players);
++        fprintf(f, ",\"security\":%d,\"tax\":%d", e->security, e->tax);
+         fprintf(
+             f,
+             ",\"planet_count\":%d,\"population\":%d,\"factories\":%d,\"bases\":%d,"
+@@ -272,22 +298,32 @@ static void game_ai_gate_write_planets(FILE *f, const struct game_s *g)
+     fputs("\"planets\":[", f);
+     for (int i = 0; i < g->galaxy_stars; ++i) {
+         int slider[PLANET_SLIDER_NUM];
++        int explored[PLAYER_NUM];
++        int within_frange[PLAYER_NUM];
+         const planet_t *p = &(g->planet[i]);
+         for (int si = 0; si < PLANET_SLIDER_NUM; ++si) {
+             slider[si] = p->slider[si];
+         }
++        for (int pi = 0; pi < g->players; ++pi) {
++            explored[pi] = BOOLVEC_IS1(p->explored, pi) ? 1 : 0;
++            within_frange[pi] = p->within_frange[pi];
++        }
+         if (i != 0) {
+             fputc(',', f);
+         }
+         fprintf(
+             f,
+-            "{\"planet\":%d,\"owner\":%d,\"claim\":%d,\"pop\":%d,\"factories\":%d,"
++            "{\"planet\":%d,\"owner\":%d,\"claim\":%d,\"pop\":%d,\"max_pop1\":%d,"
++            "\"max_pop2\":%d,\"max_pop3\":%d,\"factories\":%d,"
+             "\"bases\":%u,\"waste\":%d,\"buildship\":%u,\"reloc\":%u,"
+             "\"have_stargate\":%s,",
+             i,
+             p->owner,
+             p->claim,
+             p->pop,
++            p->max_pop1,
++            p->max_pop2,
++            p->max_pop3,
+             p->factories,
+             p->missile_bases,
+             p->waste,
+@@ -297,6 +333,10 @@ static void game_ai_gate_write_planets(FILE *f, const struct game_s *g)
+         );
+         fputs("\"slider\":", f);
+         game_ai_gate_write_int_array(f, slider, PLANET_SLIDER_NUM);
++        fputs(",\"explored\":", f);
++        game_ai_gate_write_int_array(f, explored, g->players);
++        fputs(",\"within_frange\":", f);
++        game_ai_gate_write_int_array(f, within_frange, g->players);
+         fprintf(f, ",\"trans_num\":%u,\"trans_dest\":%u}", p->trans_num, p->trans_dest);
+     }
+     fputc(']', f);
+@@ -402,6 +442,30 @@ static void game_ai_gate_write_diplo(FILE *f, const struct game_s *g)
+     fputc(']', f);
+ }
+ 
++static void game_ai_gate_write_monster(FILE *f, const monster_t *m)
++{
++    fprintf(
++        f,
++        "{\"exists\":%u,\"x\":%u,\"y\":%u,\"dest\":%u,\"counter\":%d,\"nuked\":%d,\"killer\":%d}",
++        m->exists,
++        m->x,
++        m->y,
++        m->dest,
++        m->counter,
++        m->nuked,
++        (m->exists ? m->killer : PLAYER_NONE)
++    );
++}
++
++static void game_ai_gate_write_events(FILE *f, const struct game_s *g)
++{
++    fputs("\"events\":{\"crystal\":", f);
++    game_ai_gate_write_monster(f, &(g->evn.crystal));
++    fputs(",\"amoeba\":", f);
++    game_ai_gate_write_monster(f, &(g->evn.amoeba));
++    fputc('}', f);
++}
++
+ static void game_ai_gate_write_checkpoint(FILE *f, const struct game_s *g, int turn)
+ {
+     fprintf(
+@@ -423,6 +487,8 @@ static void game_ai_gate_write_checkpoint(FILE *f, const struct game_s *g, int t
+          * threshold (galaxy_stars * 2) / 3 is met. */
+         (g->election_held ? 1 : 0)
+     );
++    game_ai_gate_write_events(f, g);
++    fputc(',', f);
+     game_ai_gate_write_empires(f, g);
+     fputc(',', f);
+     game_ai_gate_write_diplo(f, g);
+@@ -433,6 +499,56 @@ static void game_ai_gate_write_checkpoint(FILE *f, const struct game_s *g, int t
+     fputc('}', f);
+ }
+ 
++static int game_opt_set_human_gate(char **argv, void *var)
++{
++    *(const char **)var = argv[1];
++    game_opt_skip_intro = true;
++    return 0;
++}
++
++static void game_human_gate_open(const struct game_s *g, const char *path)
++{
++    game_human_gate_f = fopen(path, "w");
++    if (game_human_gate_f == NULL) {
++        log_fatal_and_die("Game: human gate could not open '%s'\n", path);
++    }
++    game_human_gate_turn = 0;
++    rnd_reset_call_count();
++    fprintf(
++        game_human_gate_f,
++        "{\"meta\":{\"mode\":\"human-gate\",\"galaxy_seed\":%u,\"difficulty\":%d,\"galaxy_size\":%d,\"players\":%u,\"max_turns\":%d}}\n",
++        g->galaxy_seed, g->difficulty, g->galaxy_size, g->players, game_human_gate_max_turns
++    );
++    game_ai_gate_write_checkpoint(game_human_gate_f, g, 0);
++    fputc('\n', game_human_gate_f);
++    fflush(game_human_gate_f);
++}
++
++/* Returns true when the human-gate horizon or a terminal end is reached. */
++static bool game_human_gate_after_turn(struct game_s *g, const struct game_end_s *ge)
++{
++    bool done = false;
++    ++game_human_gate_turn;
++    if ((ge->type != GAME_END_NONE) && (ge->type != GAME_END_FINAL_WAR) && (ge->type != GAME_END_QUIT)) {
++        if (g->end == GAME_END_NONE) {
++            g->end = ge->type;
++        }
++        done = true;
++    }
++    game_ai_gate_write_checkpoint(game_human_gate_f, g, game_human_gate_turn);
++    fputc('\n', game_human_gate_f);
++    fflush(game_human_gate_f);
++    if (game_human_gate_turn >= game_human_gate_max_turns) {
++        done = true;
++    }
++    if (done) {
++        fclose(game_human_gate_f);
++        game_human_gate_f = NULL;
++        log_message("Game: human gate wrote %s (%d turns)\n", game_opt_human_gate_path, game_human_gate_turn);
++    }
++    return done;
++}
++
+ static int game_run_ai_gate(struct game_s *g, const char *path)
+ {
+     struct game_end_s game_end = { GAME_END_NONE, 0, 0, 0, 0 };
+@@ -1045,6 +1161,12 @@ const struct cmdline_options_s main_cmdline_options[] = {
+     { "--ai-gate-turns", 1,
+       options_set_int_var, (void *)&game_ai_gate_max_turns,
+       "TURNS", "Set AI-gate turn horizon" },
++    { "--human-gate", 1,
++      game_opt_set_human_gate, (void *)&game_opt_human_gate_path,
++      "OUTFILE", "Human-seat oracle: play slot 0 from stdin, dump per-turn checkpoint JSONL" },
++    { "--human-gate-turns", 1,
++      options_set_int_var, (void *)&game_human_gate_max_turns,
++      "TURNS", "Set human-gate turn horizon" },
+     { 0, 0, 0, 0, 0, 0 }
+ };
+ 
+@@ -1280,7 +1402,9 @@ int main_do(void)
+         if (main_jumpscreen_spec != NULL
+           && ((strcmp(main_jumpscreen_spec, "newgame") == 0)
+             || (strcmp(main_jumpscreen_spec, "newgame_race") == 0)
++            || (strncmp(main_jumpscreen_spec, "newgame_race:", 13) == 0)
+             || (strcmp(main_jumpscreen_spec, "newgame_banner") == 0)
++            || (strncmp(main_jumpscreen_spec, "newgame_banner:", 15) == 0)
+             || (strcmp(main_jumpscreen_spec, "newgame_empire") == 0)
+             || (strcmp(main_jumpscreen_spec, "newgame_home") == 0)
+             || (strncmp(main_jumpscreen_spec, "newgame:", 8) == 0))
+@@ -1389,6 +1513,9 @@ int main_do(void)
+             game_stop(&game);
+             return (ret == 0) ? 0 : 1;
+         }
++        if (game_opt_human_gate_path) {
++            game_human_gate_open(&game, game_opt_human_gate_path);
++        }
+         ui_game_start(&game);
+         /* DRG agent-orion patch: -jumpscreen NAME[:ARGS] dispatches to a UI
+            screen function and exits, bypassing the normal turn loop. */
+@@ -1447,6 +1574,11 @@ int main_do(void)
+             if (game_end.type != GAME_END_QUIT) {
+                 game_end = game_turn_process(&game);
+                 game_replay_update_current_year();
++                if (game_human_gate_f && game_human_gate_after_turn(&game, &game_end)) {
++                    ui_game_end(&game);
++                    game_stop(&game);
++                    return 0;
++                }
+             }
+             game.active_player = PLAYER_0;
+         }
+diff --git a/src/rnd.c b/src/rnd.c
+index edc07560..2b6e936f 100644
+--- a/src/rnd.c
++++ b/src/rnd.c
+@@ -1,5 +1,9 @@
+ #include "config.h"
+ 
++#include <stdio.h>
++#include <stdlib.h>
++
++#define RND_NO_CALLSITE_MACROS
+ #include "rnd.h"
+ #include "hw.h"
+ #include "types.h"
+@@ -7,6 +11,23 @@
+ /* -------------------------------------------------------------------------- */
+ 
+ static unsigned int rnd_call_count = 0;
++const char *rnd_callsite_file = "?";
++int rnd_callsite_line = 0;
++
++static void rnd_log_call(uint16_t n, uint32_t seed_in)
++{
++    static FILE *f = NULL;
++    static int state = -1;
++    if (state < 0) {
++        const char *path = getenv("MOO_RNG_LOG");
++        f = (path && *path) ? fopen(path, "w") : NULL;
++        state = f ? 1 : 0;
++    }
++    if (state) {
++        fprintf(f, "%u %s:%d n=%u seed_in=%u\n", rnd_call_count, rnd_callsite_file, rnd_callsite_line, n, seed_in);
++        fflush(f);
++    }
++}
+ 
+ /* -------------------------------------------------------------------------- */
+ 
+@@ -14,6 +35,7 @@ uint16_t rnd_0_nm1(uint16_t n, uint32_t *seed)
+ {   /* NOTE: This code is simplified and contains hacks.
+        Assembler code in this function would be more appropriate. */
+     ++rnd_call_count;
++    rnd_log_call(n, *seed);
+     uint16_t r = 0;
+     uint32_t di_si = *seed;
+ 
+@@ -106,3 +128,8 @@ void rnd_reset_call_count(void)
+ {
+     rnd_call_count = 0;
+ }
++
++void rnd_set_call_count(unsigned int count)
++{
++    rnd_call_count = count;
++}
+diff --git a/src/rnd.h b/src/rnd.h
+index 0f708cd8..32668a5b 100644
+--- a/src/rnd.h
++++ b/src/rnd.h
+@@ -9,5 +9,16 @@ extern uint32_t rnd_get_new_seed(void);
+ extern uint16_t rnd_bitfiddle(uint16_t ax);
+ extern unsigned int rnd_get_call_count(void);
+ extern void rnd_reset_call_count(void);
++/* DRG-HUMAN-GATE: display-only replays save/restore the counter so their draws do not count. */
++extern void rnd_set_call_count(unsigned int count);
++
++/* DRG-HUMAN-GATE 2026-09-29: record call sites so MOO_RNG_LOG=<path> can
++ * write one line per draw (diagnosis of human-gate RNG frontiers). */
++extern const char *rnd_callsite_file;
++extern int rnd_callsite_line;
++#ifndef RND_NO_CALLSITE_MACROS
++#define rnd_0_nm1(n, s) (rnd_callsite_file = __FILE__, rnd_callsite_line = __LINE__, rnd_0_nm1((n), (s)))
++#define rnd_1_n(n, s) (rnd_callsite_file = __FILE__, rnd_callsite_line = __LINE__, rnd_1_n((n), (s)))
++#endif
+ 
+ #endif
+diff --git a/src/ui/cmdline/uiaudience.c b/src/ui/cmdline/uiaudience.c
+index bdedcc56..a4edcdb5 100644
+--- a/src/ui/cmdline/uiaudience.c
++++ b/src/ui/cmdline/uiaudience.c
+@@ -69,6 +69,7 @@ static int16_t ui_audience_ask(struct audience_s *au)
+ 
+ void ui_audience_start(struct audience_s *au)
+ {
++    ui_input_event("audience", "ph=%d pa=%d mode=%d dtype=%d", au->ph, au->pa, au->mode, au->dtype);
+     ui_switch_2(au->g, au->ph, au->pa);
+ }
+ 
+diff --git a/src/ui/cmdline/uibattle.c b/src/ui/cmdline/uibattle.c
+index ef95fabd..5d9f8145 100644
+--- a/src/ui/cmdline/uibattle.c
++++ b/src/ui/cmdline/uibattle.c
+@@ -175,6 +175,7 @@ ui_battle_autoresolve_t ui_battle_init(struct battle_s *bt)
+     const planet_t *p = &(g->planet[bt->planet_i]);
+     int party_u = bt->s[SIDE_L].party, party_d = bt->s[SIDE_R].party;
+     const char *s1, *s2, *s3;
++    ui_input_event("battle", "planet=%d party_l=%d party_r=%d", bt->planet_i, party_u, party_d);
+     ui_switch_2(bt->g, party_u, party_d);
+     if (party_d >= PLAYER_NUM) {
+         s1 = game_str_tbl_mon_names[party_d - PLAYER_NUM];
+diff --git a/src/ui/cmdline/uiground.c b/src/ui/cmdline/uiground.c
+index ed840f64..9d755d53 100644
+--- a/src/ui/cmdline/uiground.c
++++ b/src/ui/cmdline/uiground.c
+@@ -8,6 +8,7 @@
+ #include "game_spy.h"
+ #include "game_str.h"
+ #include "game_tech.h"
++#include "rnd.h"
+ #include "uiswitch.h"
+ 
+ /* -------------------------------------------------------------------------- */
+@@ -47,8 +48,14 @@ void ui_ground(struct game_s *g, struct ground_s *gr)
+     ui_ground_print_troops(gr, strrace);
+     fputs("Ground | ", stdout);
+     printf("(*BANG* *ZZZAP* etc)\n");
+-    while ((gr->s[0].pop1 != 0) && (gr->s[1].pop1 != 0)) {
+-        game_ground_kill(gr);
++    {
++        /* Display-only replay on a copy of the stored seed: its draws must not
++         * advance the oracle RNG call counter (human-gate diagnostic). */
++        unsigned int calls = rnd_get_call_count();
++        while ((gr->s[0].pop1 != 0) && (gr->s[1].pop1 != 0)) {
++            game_ground_kill(gr);
++        }
++        rnd_set_call_count(calls);
+     }
+     ui_ground_print_troops(gr, strrace);
+     {
+diff --git a/src/ui/cmdline/uiinput.c b/src/ui/cmdline/uiinput.c
+index 79e6c0c9..3ebd8866 100644
+--- a/src/ui/cmdline/uiinput.c
++++ b/src/ui/cmdline/uiinput.c
+@@ -1,6 +1,7 @@
+ #include "config.h"
+ 
+ #include <ctype.h>
++#include <stdarg.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -28,6 +29,65 @@ const struct input_list_s il_yes_no[] = {
+     { 0, NULL, NULL, NULL }
+ };
+ 
++/* DRG-HUMAN-GATE 2026-09-29: when MOO_INPUT_LOG names a file, append one
++ * line per consumed input: <seq>\t<list title>\t<prompt>\t<answer>. The
++ * human-gate runner uses it to fail on prompt/answer misalignment. */
++static FILE *ui_input_log_f = NULL;
++static bool ui_input_log_checked = false;
++static int ui_input_log_seq = 0;
++static const char *ui_input_log_title = NULL;
++/* DRG-HUMAN-GATE: when MOO_PROMPT_MARK is set, every input read is preceded
++ * by one stdout line "@@PROMPT\t<title>\t<prompt>\t<opts>" where opts is
++ * "value^key^display" for each selectable list item, joined by '|'. Lets a
++ * driver answer prompts by kind instead of by position. */
++static char ui_input_opts[4096];
++
++static void ui_input_mark(const char *prompt)
++{
++    static int mark = -1;
++    if (mark < 0) {
++        const char *e = getenv("MOO_PROMPT_MARK");
++        mark = (e && *e) ? 1 : 0;
++    }
++    if (mark) {
++        printf("\n@@PROMPT\t%s\t%s\t%s\n", ui_input_log_title ? ui_input_log_title : "", prompt ? prompt : "", ui_input_opts);
++        fflush(stdout);
++    }
++    ui_input_opts[0] = '\0';
++}
++
++static void ui_input_log(const char *prompt, const char *answer)
++{
++    if (!ui_input_log_checked) {
++        const char *path = getenv("MOO_INPUT_LOG");
++        ui_input_log_checked = true;
++        if (path && *path) {
++            ui_input_log_f = fopen(path, "w");
++        }
++    }
++    if (ui_input_log_f) {
++        fprintf(ui_input_log_f, "%d\t%s\t%s\t%s\n", ++ui_input_log_seq,
++                ui_input_log_title ? ui_input_log_title : "", prompt ? prompt : "", answer ? answer : "<EOF>");
++        fflush(ui_input_log_f);
++    }
++    ui_input_log_title = NULL;
++}
++
++void ui_input_event(const char *name, const char *fmt, ...)
++{
++    const char *e = getenv("MOO_PROMPT_MARK");
++    va_list ap;
++    if (!(e && *e)) {
++        return;
++    }
++    printf("\n@@EVENT\t%s\t", name);
++    va_start(ap, fmt);
++    vprintf(fmt, ap);
++    va_end(ap);
++    putchar('\n');
++    fflush(stdout);
++}
++
+ /* -------------------------------------------------------------------------- */
+ 
+ static char *skip_whitespace(char *str)
+@@ -101,13 +161,16 @@ char *ui_input_line(const char *prompt)
+ {
+     static char *line = NULL;
+     lib_free(line);
++    ui_input_mark(prompt);
+     line = readline(prompt);
+     if ((line != 0) && (*line != 0)) {
+         add_history(line);
+     } else if (line == NULL) {
++        ui_input_log(prompt, NULL);
+         log_message("(end of input)\n");
+         exit(0);
+     }
++    ui_input_log(prompt, line);
+     return line;
+ }
+ #else
+@@ -115,6 +178,7 @@ char *ui_input_line(const char *prompt)
+ {
+     static char line[1024];
+     line[sizeof(line) - 1] = 0;
++    ui_input_mark(prompt);
+     fputs(prompt, stdout);
+     fflush(stdout);
+     if (fgets(line, sizeof(line) - 1, stdin)) {
+@@ -124,8 +188,10 @@ char *ui_input_line(const char *prompt)
+             ++p;
+         }
+         *p = 0;
++        ui_input_log(prompt, line);
+         return line;
+     } else {
++        ui_input_log(prompt, NULL);
+         log_message("(end of input)\n");
+         exit(0);
+     }
+@@ -234,6 +300,19 @@ int ui_input_list_dynamic(const char *title, const char *prompt, const struct in
+             }
+             ++l;
+         }
++        ui_input_log_title = title;
++        ui_input_opts[0] = '\0';
++        l = list;
++        while ((l->str) || (l->key)) {
++            const char *s = ld->get_display ? ld->get_display(ld->ctx, l) : l->display;
++            bool ok = ld->is_ok ? ld->is_ok(ld->ctx, l) : true;
++            if (s && ok) {
++                char item[256];
++                lib_sprintf(item, sizeof(item), "%s%d^%s^%s", ui_input_opts[0] ? "|" : "", l->value, l->key ? l->key : "", s);
++                lib_strcat(ui_input_opts, item, sizeof(ui_input_opts));
++            }
++            ++l;
++        }
+         in = ui_input_line(prompt);
+         l = list;
+         i = 0;
+diff --git a/src/ui/cmdline/uiinput.h b/src/ui/cmdline/uiinput.h
+index da8d950b..33010b0c 100644
+--- a/src/ui/cmdline/uiinput.h
++++ b/src/ui/cmdline/uiinput.h
+@@ -23,6 +23,8 @@ struct input_cmd_s;
+ 
+ extern bool ui_input_match_input(const char *in, const char *key, const char *str);
+ extern void ui_input_wait_enter(void);
++/* DRG-HUMAN-GATE: "@@EVENT\t<name>\t<k=v ...>" marker under MOO_PROMPT_MARK. */
++extern void ui_input_event(const char *name, const char *fmt, ...);
+ extern char *ui_input_line(const char *prompt);
+ extern char *ui_input_line_len_trim(const char *prompt, int maxlen);
+ extern int ui_input_list(const char *title, const char *prompt, const struct input_list_s *list);
+diff --git a/src/ui/cmdline/uinewtech.c b/src/ui/cmdline/uinewtech.c
+index 0b432cce..104f3471 100644
+--- a/src/ui/cmdline/uinewtech.c
++++ b/src/ui/cmdline/uinewtech.c
+@@ -131,8 +131,19 @@ static void ui_newtech_adjust(struct newtech_data_s *d)
+             rl_in[i].display = game_str_tbl_nt_adj[i];
+         }
+         v = ui_input_list(buf, "> ", rl_in);
+-        game_update_tech_util(d->g);
+-        game_planet_adjust_percent(d->g, d->api, tbl_a0[d->dialog_type - 1], game_num_tbl_tech_autoadj[v], tbl_a2[d->dialog_type - 1]);
++        /* DRG-HUMAN-GATE 2026-09-29: the stock cmdline call passes
++         * tbl_a0/tbl_a2 as slider/growth (SHIP, growth 3 => no-op) and
++         * adjusts even on NO. Mirror the classic UI instead
++         * (1oom/src/ui/classic/uinewtech.c:301-320): NO dismisses, presets
++         * use tbl_si/tbl_gr, so the human-gate oracle matches classic play. */
++        (void)tbl_a0;
++        (void)tbl_a2;
++        if (v != 0) {
++            const planet_slider_i_t tbl_si[5] = { PLANET_SLIDER_IND, PLANET_SLIDER_ECO, PLANET_SLIDER_DEF, PLANET_SLIDER_ECO, PLANET_SLIDER_ECO };
++            const int tbl_gr[5] = { 0, 0, 0, 1, 2 };
++            game_update_tech_util(d->g);
++            game_planet_adjust_percent(d->g, d->api, tbl_si[d->dialog_type - 1], game_num_tbl_tech_autoadj[v], tbl_gr[d->dialog_type - 1]);
++        }
+     }
+ }
+ 
