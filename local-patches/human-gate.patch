@@ -5,9 +5,11 @@ Includes the ai-gate checkpoint exporter fields the human-gate JSONL reuses
 (spies/spymode/spyfund/spying, security, tax, max_pop1-3, explored,
 within_frange, crystal/amoeba events). uiground.c: display-only replay
 draws do not advance the RNG call counter (rnd_set_call_count). Applies cleanly to a clean HEAD.
-
+  Split 2026-10-15: the newgame_race:/newgame_banner: jumpscreen-arg routing (game.c) and its
+  uijumpscreen.c/uinewgame.c/h parser moved to jumpscreen-newgame-args.patch (screenshot fixtures only).
+  Applies to pristine HEAD alone and together with that patch (git apply --check verified).
 diff --git a/src/game/game.c b/src/game/game.c
-index 25ad841e..bac0c6cb 100644
+index 25ad841..fd6c5a0 100644
 --- a/src/game/game.c
 +++ b/src/game/game.c
 @@ -40,6 +40,15 @@ static bool game_opt_save_quit = false;
@@ -219,17 +221,7 @@ index 25ad841e..bac0c6cb 100644
      { 0, 0, 0, 0, 0, 0 }
  };
  
-@@ -1280,7 +1402,9 @@ int main_do(void)
-         if (main_jumpscreen_spec != NULL
-           && ((strcmp(main_jumpscreen_spec, "newgame") == 0)
-             || (strcmp(main_jumpscreen_spec, "newgame_race") == 0)
-+            || (strncmp(main_jumpscreen_spec, "newgame_race:", 13) == 0)
-             || (strcmp(main_jumpscreen_spec, "newgame_banner") == 0)
-+            || (strncmp(main_jumpscreen_spec, "newgame_banner:", 15) == 0)
-             || (strcmp(main_jumpscreen_spec, "newgame_empire") == 0)
-             || (strcmp(main_jumpscreen_spec, "newgame_home") == 0)
-             || (strncmp(main_jumpscreen_spec, "newgame:", 8) == 0))
-@@ -1389,6 +1513,9 @@ int main_do(void)
+@@ -1389,6 +1511,9 @@ int main_do(void)
              game_stop(&game);
              return (ret == 0) ? 0 : 1;
          }
@@ -239,7 +231,7 @@ index 25ad841e..bac0c6cb 100644
          ui_game_start(&game);
          /* DRG agent-orion patch: -jumpscreen NAME[:ARGS] dispatches to a UI
             screen function and exits, bypassing the normal turn loop. */
-@@ -1447,6 +1574,11 @@ int main_do(void)
+@@ -1447,6 +1572,11 @@ int main_do(void)
              if (game_end.type != GAME_END_QUIT) {
                  game_end = game_turn_process(&game);
                  game_replay_update_current_year();
@@ -252,7 +244,7 @@ index 25ad841e..bac0c6cb 100644
              game.active_player = PLAYER_0;
          }
 diff --git a/src/rnd.c b/src/rnd.c
-index edc07560..2b6e936f 100644
+index edc0756..2b6e936 100644
 --- a/src/rnd.c
 +++ b/src/rnd.c
 @@ -1,5 +1,9 @@
@@ -307,7 +299,7 @@ index edc07560..2b6e936f 100644
 +    rnd_call_count = count;
 +}
 diff --git a/src/rnd.h b/src/rnd.h
-index 0f708cd8..32668a5b 100644
+index 0f708cd..32668a5 100644
 --- a/src/rnd.h
 +++ b/src/rnd.h
 @@ -9,5 +9,16 @@ extern uint32_t rnd_get_new_seed(void);
@@ -328,7 +320,7 @@ index 0f708cd8..32668a5b 100644
  
  #endif
 diff --git a/src/ui/cmdline/uiaudience.c b/src/ui/cmdline/uiaudience.c
-index bdedcc56..a4edcdb5 100644
+index bdedcc5..a4edcdb 100644
 --- a/src/ui/cmdline/uiaudience.c
 +++ b/src/ui/cmdline/uiaudience.c
 @@ -69,6 +69,7 @@ static int16_t ui_audience_ask(struct audience_s *au)
@@ -340,7 +332,7 @@ index bdedcc56..a4edcdb5 100644
  }
  
 diff --git a/src/ui/cmdline/uibattle.c b/src/ui/cmdline/uibattle.c
-index ef95fabd..5d9f8145 100644
+index ef95fab..5d9f814 100644
 --- a/src/ui/cmdline/uibattle.c
 +++ b/src/ui/cmdline/uibattle.c
 @@ -175,6 +175,7 @@ ui_battle_autoresolve_t ui_battle_init(struct battle_s *bt)
@@ -352,7 +344,7 @@ index ef95fabd..5d9f8145 100644
      if (party_d >= PLAYER_NUM) {
          s1 = game_str_tbl_mon_names[party_d - PLAYER_NUM];
 diff --git a/src/ui/cmdline/uiground.c b/src/ui/cmdline/uiground.c
-index ed840f64..9d755d53 100644
+index ed840f6..9d755d5 100644
 --- a/src/ui/cmdline/uiground.c
 +++ b/src/ui/cmdline/uiground.c
 @@ -8,6 +8,7 @@
@@ -381,7 +373,7 @@ index ed840f64..9d755d53 100644
      ui_ground_print_troops(gr, strrace);
      {
 diff --git a/src/ui/cmdline/uiinput.c b/src/ui/cmdline/uiinput.c
-index 79e6c0c9..3ebd8866 100644
+index 79e6c0c..3ebd886 100644
 --- a/src/ui/cmdline/uiinput.c
 +++ b/src/ui/cmdline/uiinput.c
 @@ -1,6 +1,7 @@
@@ -515,7 +507,7 @@ index 79e6c0c9..3ebd8866 100644
          l = list;
          i = 0;
 diff --git a/src/ui/cmdline/uiinput.h b/src/ui/cmdline/uiinput.h
-index da8d950b..33010b0c 100644
+index da8d950..33010b0 100644
 --- a/src/ui/cmdline/uiinput.h
 +++ b/src/ui/cmdline/uiinput.h
 @@ -23,6 +23,8 @@ struct input_cmd_s;
@@ -528,7 +520,7 @@ index da8d950b..33010b0c 100644
  extern char *ui_input_line_len_trim(const char *prompt, int maxlen);
  extern int ui_input_list(const char *title, const char *prompt, const struct input_list_s *list);
 diff --git a/src/ui/cmdline/uinewtech.c b/src/ui/cmdline/uinewtech.c
-index 0b432cce..104f3471 100644
+index 0b432cc..104f347 100644
 --- a/src/ui/cmdline/uinewtech.c
 +++ b/src/ui/cmdline/uinewtech.c
 @@ -131,8 +131,19 @@ static void ui_newtech_adjust(struct newtech_data_s *d)
